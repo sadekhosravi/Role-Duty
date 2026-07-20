@@ -1,0 +1,4 @@
+docling
+chromadb
+python-dotenv
+sentence-transformers
