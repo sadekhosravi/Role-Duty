@@ -1,7 +1,22 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python -m py_compile src/rag/*.py scripts/*.py)"
+      "Bash(python -m py_compile src/rag/*.py scripts/*.py)",
+      "Bash(.venv/Scripts/python.exe -c \"import sys; print\\('py', sys.version\\)\")",
+      "Bash(.venv/Scripts/python.exe -c \"import lightrag; print\\('lightrag', lightrag.__version__\\)\")",
+      "Bash(.venv/Scripts/python.exe -c \"import docling; print\\('docling', docling.__version__\\)\")",
+      "Bash(.venv/Scripts/python.exe -c \"import openai; print\\('openai', openai.__version__\\)\")",
+      "Bash(.venv/Scripts/python.exe -m pip show docling)",
+      "Bash(.venv/Scripts/python.exe -m pip install lightrag-hku)",
+      "Bash(uv --version)",
+      "Bash(.venv/Scripts/python.exe -c \"from importlib.metadata import version; print\\('docling', version\\('docling'\\)\\)\")",
+      "Bash(.venv/Scripts/python.exe -c ' *)",
+      "Bash(.venv/Scripts/python.exe src/graph_rag/graph_rag.py ingest --help)",
+      "Bash(.venv/Scripts/python.exe src/graph_rag/graph_rag.py --help)",
+      "Bash(.venv/Scripts/python.exe src/graph_rag/graph_rag.py remove --help)",
+      "Bash(rm -rf data/graph_rag lightrag.log)",
+      "Bash(PYTHONIOENCODING=utf-8 .venv/Scripts/python.exe src/graph_rag/graph_rag.py ingest data/raw/sample_role_duties_plain.pdf)",
+      "Bash(PYTHONIOENCODING=utf-8 timeout 110 .venv/Scripts/python.exe src/graph_rag/graph_rag.py query \"What roles are described in this document and what are their duties?\" --mode hybrid)"
     ]
   }
 }

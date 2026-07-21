@@ -2,3 +2,5 @@ docling
 chromadb
 python-dotenv
 sentence-transformers
+lightrag-hku
+openai

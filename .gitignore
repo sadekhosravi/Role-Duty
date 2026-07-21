@@ -11,6 +11,7 @@ venv/
 # Data
 data/chroma/
 data/raw/*.pdf
+data/*
 
 # IDE / OS
 .vscode/

@@ -1,0 +1,239 @@
+2026-07-21 15:20:14,801 - lightrag - INFO - [] Created new empty graph file: data\graph_rag\graph_chunk_entity_relation.graphml
+2026-07-21 15:20:14,805 - lightrag - INFO - Role LLM Configuration (initialized):
+2026-07-21 15:20:14,805 - lightrag - INFO -  - extract: None/None, host=None, max_async=4, timeout=240
+2026-07-21 15:20:14,805 - lightrag - INFO -  - keyword: None/None, host=None, max_async=4, timeout=240
+2026-07-21 15:20:14,805 - lightrag - INFO -  - query: None/None, host=None, max_async=4, timeout=240
+2026-07-21 15:20:14,805 - lightrag - INFO -  - vlm: None/None, host=None, max_async=4, timeout=240
+2026-07-21 15:20:14,805 - lightrag - INFO - [] Process 7780 KV load full_docs with 0 records
+2026-07-21 15:20:14,806 - lightrag - INFO - [] Process 7780 KV load text_chunks with 0 records
+2026-07-21 15:20:14,806 - lightrag - INFO - [] Process 7780 KV load full_entities with 0 records
+2026-07-21 15:20:14,806 - lightrag - INFO - [] Process 7780 KV load full_relations with 0 records
+2026-07-21 15:20:14,806 - lightrag - INFO - [] Process 7780 KV load entity_chunks with 0 records
+2026-07-21 15:20:14,806 - lightrag - INFO - [] Process 7780 KV load relation_chunks with 0 records
+2026-07-21 15:20:14,806 - lightrag - INFO - [] Process 7780 KV load llm_response_cache with 0 records
+2026-07-21 15:20:14,807 - lightrag - INFO - [] Process 7780 doc status load doc_status with 0 records
+2026-07-21 15:20:19,392 - lightrag - INFO - Processing 1 document(s)
+2026-07-21 15:20:19,394 - lightrag - INFO - Parsing (native): sample_role_duties_plain.pdf
+2026-07-21 15:20:19,401 - lightrag - INFO - Extracting stage 1/1: sample_role_duties_plain.pdf
+2026-07-21 15:20:19,401 - lightrag - INFO - Processing d-id: sample_role_duties_plain.pdf
+2026-07-21 15:20:19,401 - lightrag - INFO - Chunking F(legacy): size=1200, split_only=False, overlap=100, doc_id: sample_role_duties_plain.pdf
+2026-07-21 15:20:19,408 - lightrag - INFO - extract LLM func: 4 new workers initialized (Timeouts: Func: 240s, Worker: 480s, Health Check: 495s)
+2026-07-21 15:20:31,198 - lightrag - INFO -  == LLM cache == saving: default:extract:a54f1ba545ccd5e954da3e778b367304
+2026-07-21 15:20:48,367 - lightrag - INFO -  == LLM cache == saving: default:extract:3b7fc071cb7dc93b678f102628c7fa72
+2026-07-21 15:20:48,369 - lightrag - INFO - Chunk 1 of 2 extracted 15 Ent + 15 Rel sample_role_duties_plain.pdf-chunk-001
+2026-07-21 15:21:18,144 - lightrag - INFO -  == LLM cache == saving: default:extract:def4a58c6d9f1d42e6294dd4cf266a76
+2026-07-21 15:23:42,764 - lightrag - INFO -  == LLM cache == saving: default:extract:1c41882e0a45e9ee9f48b0305c2ae376
+2026-07-21 15:23:42,778 - lightrag - INFO - Chunk 2 of 2 extracted 11 Ent + 54 Rel sample_role_duties_plain.pdf-chunk-000
+2026-07-21 15:23:42,779 - lightrag - INFO - Merging stage 1/1: sample_role_duties_plain.pdf
+2026-07-21 15:23:42,779 - lightrag - INFO - Phase 1: Processing 24 entities from sample_role_duties_plain.pdf (async: 8)
+2026-07-21 15:23:42,793 - lightrag - INFO - Phase 2: Processing 50 relations from sample_role_duties_plain.pdf (async: 8)
+2026-07-21 15:23:42,797 - lightrag - INFO - Upserting relation VDB: `Refund Requests->Team Lead`
+2026-07-21 15:23:42,797 - lightrag - INFO - Upserting relation VDB: `Product Defect Complaints->Quality`
+2026-07-21 15:23:42,798 - lightrag - INFO - Upserting relation VDB: `Marketing Communications->Public Statements`
+2026-07-21 15:23:42,799 - lightrag - INFO - Upserting relation VDB: `Store Manager->Store-Level Decisions`
+2026-07-21 15:23:42,801 - lightrag - INFO - Upserting relation VDB: `Customer Experience Team Lead->Refund Requests`
+2026-07-21 15:23:42,802 - lightrag - INFO - Upserting relation VDB: `Store Manager->Team Lead`
+2026-07-21 15:23:42,803 - lightrag - INFO - Upserting relation VDB: `Escalation Path->Refund Requests Above $150`
+2026-07-21 15:23:42,805 - lightrag - INFO - Upserting relation VDB: `Customer Experience Team Lead->Legal Threats`
+2026-07-21 15:23:42,806 - lightrag - INFO - Upserting relation VDB: `Escalation Path->Threat of Legal Action`
+2026-07-21 15:23:42,807 - lightrag - INFO - Upserting relation VDB: `Quality->Repeated Complaints`
+2026-07-21 15:23:42,809 - lightrag - INFO - Upserting relation VDB: `Customer Experience Team Lead->Safety Issues`
+2026-07-21 15:23:42,810 - lightrag - INFO - Upserting relation VDB: `Shift Supervisor->Store Associate Front of House`
+2026-07-21 15:23:42,836 - lightrag - INFO - Upserting relation VDB: `Escalation Path->Repeated Complaints`
+2026-07-21 15:23:42,863 - lightrag - INFO - Upserting relation VDB: `Customer Experience Team Lead->Team Lead`
+2026-07-21 15:23:42,865 - lightrag - INFO - Upserting relation VDB: `Customer Experience Team Lead->Quality`
+2026-07-21 15:23:42,866 - lightrag - INFO - Upserting relation VDB: `Customer Experience Team Lead->Repeated Complaints`
+2026-07-21 15:23:46,789 - lightrag - INFO -  == LLM cache == saving: default:summary:a003e73fa260a5248cbc56a6b2433fa9
+2026-07-21 15:23:46,789 - lightrag - INFO - LLMmrg: `Regional Operations Director`~`Store Manager` | 0+8 (dd 1)
+2026-07-21 15:23:46,791 - lightrag - INFO - Upserting relation VDB: `Regional Operations Director->Store Manager`
+2026-07-21 15:23:46,792 - lightrag - INFO - Upserting relation VDB: `Shift Supervisor->Store Manager`
+2026-07-21 15:23:46,792 - lightrag - INFO - Upserting relation VDB: `Store Manager->Store Operations Department`
+2026-07-21 15:23:46,794 - lightrag - INFO - Upserting relation VDB: `Shift Supervisor->Store Operations Department`
+2026-07-21 15:23:46,794 - lightrag - INFO - Upserting relation VDB: `Store Associate Front of House->Store Manager`
+2026-07-21 15:23:54,859 - lightrag - INFO -  == LLM cache == saving: default:summary:473a4672c7961428c3cbad524a1079ce
+2026-07-21 15:23:54,860 - lightrag - INFO - LLMmrg: `Warehouse Inventory Specialist`~`Warehouse Operations Lead` | 0+8
+2026-07-21 15:23:54,861 - lightrag - INFO - Upserting relation VDB: `Warehouse Inventory Specialist->Warehouse Operations Lead`
+2026-07-21 15:23:54,862 - lightrag - INFO - Upserting relation VDB: `Regional Operations Director->Warehouse Inventory Specialist`
+2026-07-21 15:23:54,864 - lightrag - INFO - Upserting relation VDB: `Shift Supervisor->Warehouse Inventory Specialist`
+2026-07-21 15:23:54,864 - lightrag - INFO - Upserting relation VDB: `Regional Operations Director->Warehouse Operations Lead`
+2026-07-21 15:23:54,866 - lightrag - INFO - Upserting relation VDB: `Store Manager->Warehouse Inventory Specialist`
+2026-07-21 15:23:55,891 - lightrag - INFO -  == LLM cache == saving: default:summary:995cee305fb7ae4d4558b87f40f08d5c
+2026-07-21 15:23:55,892 - lightrag - INFO - LLMmrg: `Customer Experience Team Lead`~`Customer Support Representative` | 0+8
+2026-07-21 15:23:55,893 - lightrag - INFO - Upserting relation VDB: `Customer Experience Team Lead->Customer Support Representative`
+2026-07-21 15:23:55,895 - lightrag - INFO - Upserting relation VDB: `Customer Support Representative->Regional Operations Director`
+2026-07-21 15:23:55,896 - lightrag - INFO - Upserting relation VDB: `Customer Experience Team Lead->Regional Operations Director`
+2026-07-21 15:23:55,897 - lightrag - INFO - Upserting relation VDB: `Customer Support Representative->Store Manager`
+2026-07-21 15:23:55,899 - lightrag - INFO - Upserting relation VDB: `Customer Experience Team Lead->Warehouse Operations Lead`
+2026-07-21 15:23:55,900 - lightrag - INFO - Upserting relation VDB: `Customer Support Representative->Store Associate Front of House`
+2026-07-21 15:23:55,902 - lightrag - INFO - Upserting relation VDB: `Customer Experience Team Lead->Shift Supervisor`
+2026-07-21 15:23:55,903 - lightrag - INFO - Upserting relation VDB: `Regional Operations Director->Store Associate Front of House`
+2026-07-21 15:23:55,904 - lightrag - INFO - Upserting relation VDB: `Supply Chain Department->Warehouse Inventory Specialist`
+2026-07-21 15:23:55,907 - lightrag - INFO - Upserting relation VDB: `Customer Support Representative->Shift Supervisor`
+2026-07-21 15:23:55,908 - lightrag - INFO - Upserting relation VDB: `Customer Experience Team Lead->Store Manager`
+2026-07-21 15:23:55,909 - lightrag - INFO - Upserting relation VDB: `Regional Operations Director->Store Operations Department`
+2026-07-21 15:23:55,910 - lightrag - INFO - Upserting relation VDB: `Supply Chain Department->Warehouse Operations Lead`
+2026-07-21 15:23:55,913 - lightrag - INFO - Upserting relation VDB: `Customer Support Representative->Warehouse Inventory Specialist`
+2026-07-21 15:23:55,914 - lightrag - INFO - Upserting relation VDB: `Customer Experience Team Lead->Store Associate Front of House`
+2026-07-21 15:23:55,915 - lightrag - INFO - Upserting relation VDB: `Shift Supervisor->Warehouse Operations Lead`
+2026-07-21 15:23:55,916 - lightrag - INFO - Upserting relation VDB: `Regional Operations Director->Supply Chain Department`
+2026-07-21 15:23:55,918 - lightrag - INFO - Upserting relation VDB: `Customer Experience Department->Customer Support Representative`
+2026-07-21 15:23:55,918 - lightrag - INFO - Upserting relation VDB: `Store Associate Front of House->Store Operations Department`
+2026-07-21 15:23:55,920 - lightrag - INFO - Upserting relation VDB: `Store Manager->Warehouse Operations Lead`
+2026-07-21 15:23:55,921 - lightrag - INFO - Upserting relation VDB: `Customer Experience Team Lead->Store Operations Department`
+2026-07-21 15:23:55,922 - lightrag - INFO - Upserting relation VDB: `Customer Experience Team Lead->Warehouse Inventory Specialist`
+2026-07-21 15:23:55,924 - lightrag - INFO - Upserting relation VDB: `Customer Experience Department->Customer Experience Team Lead`
+2026-07-21 15:23:55,925 - lightrag - INFO - Upserting relation VDB: `Customer Experience Department->Regional Operations Director`
+2026-07-21 15:23:55,926 - lightrag - INFO - Phase 2 relation processing completed for sample_role_duties_plain.pdf: edges=50 added_entities=0
+2026-07-21 15:23:55,926 - lightrag - INFO - Phase 3: Updating final 24(24+0) entities and  50 relations from sample_role_duties_plain.pdf
+2026-07-21 15:23:55,927 - lightrag - INFO - Completed merging: 24 entities, 0 extra entities, 50 relations
+2026-07-21 15:23:55,944 - lightrag - INFO - [] entities flush: embedding 24 vectors in 3 batch(es) (batch_num=10)
+2026-07-21 15:23:55,945 - lightrag - INFO - [] relationships flush: embedding 50 vectors in 5 batch(es) (batch_num=10)
+2026-07-21 15:23:55,945 - lightrag - INFO - [] chunks flush: embedding 2 vectors in 1 batch(es) (batch_num=10)
+2026-07-21 15:23:55,945 - lightrag - INFO - Embedding func: 8 new workers initialized (Timeouts: Func: 30s, Worker: 60s, Health Check: 75s)
+2026-07-21 15:23:56,282 - lightrag - INFO - [] Writing graph with 24 nodes, 50 edges
+2026-07-21 15:23:58,124 - lightrag - INFO - In memory DB persist to disk
+2026-07-21 15:23:58,125 - lightrag - INFO - Completed processing file 1/1: sample_role_duties_plain.pdf
+2026-07-21 15:23:58,126 - lightrag - INFO - Enqueued document processing pipeline stopped
+2026-07-21 15:23:58,126 - lightrag - INFO - Successfully finalized 12 storages
+2026-07-21 15:24:32,141 - lightrag - INFO - [] Loaded graph from data\graph_rag\graph_chunk_entity_relation.graphml with 24 nodes, 50 edges
+2026-07-21 15:24:32,185 - lightrag - INFO - Role LLM Configuration (initialized):
+2026-07-21 15:24:32,186 - lightrag - INFO -  - extract: None/None, host=None, max_async=4, timeout=240
+2026-07-21 15:24:32,186 - lightrag - INFO -  - keyword: None/None, host=None, max_async=4, timeout=240
+2026-07-21 15:24:32,186 - lightrag - INFO -  - query: None/None, host=None, max_async=4, timeout=240
+2026-07-21 15:24:32,186 - lightrag - INFO -  - vlm: None/None, host=None, max_async=4, timeout=240
+2026-07-21 15:24:32,199 - lightrag - INFO - [] Process 7604 KV load full_docs with 1 records
+2026-07-21 15:24:32,213 - lightrag - INFO - [] Process 7604 KV load text_chunks with 2 records
+2026-07-21 15:24:32,225 - lightrag - INFO - [] Process 7604 KV load full_entities with 1 records
+2026-07-21 15:24:32,238 - lightrag - INFO - [] Process 7604 KV load full_relations with 1 records
+2026-07-21 15:24:32,251 - lightrag - INFO - [] Process 7604 KV load entity_chunks with 24 records
+2026-07-21 15:24:32,263 - lightrag - INFO - [] Process 7604 KV load relation_chunks with 50 records
+2026-07-21 15:24:32,278 - lightrag - INFO - [] Process 7604 KV load llm_response_cache with 7 records
+2026-07-21 15:24:32,290 - lightrag - INFO - [] Process 7604 doc status load doc_status with 1 records
+2026-07-21 15:24:32,291 - lightrag - INFO - keyword LLM func: 4 new workers initialized (Timeouts: Func: 240s, Worker: 480s, Health Check: 495s)
+2026-07-21 15:24:35,017 - lightrag - INFO -  == LLM cache == saving: mix:keywords:ad63606a9144ba6c80f46618a896bdd9
+2026-07-21 15:24:35,018 - lightrag - INFO - Embedding func: 8 new workers initialized (Timeouts: Func: 30s, Worker: 60s, Health Check: 75s)
+2026-07-21 15:24:35,693 - lightrag - INFO - Query nodes: Warehouse Inventory Specialist (top_k:40, cosine:0.2)
+2026-07-21 15:24:35,699 - lightrag - INFO - Local query: 20 entites, 50 relations
+2026-07-21 15:24:35,699 - lightrag - INFO - Query edges: warehouse inventory management, job role, inventory specialist (top_k:40, cosine:0.2)
+2026-07-21 15:24:35,701 - lightrag - INFO - Global query: 15 entites, 40 relations
+2026-07-21 15:24:35,702 - lightrag - INFO - Naive query: 1 chunks (chunk_top_k:20 cosine:0.2)
+2026-07-21 15:24:35,702 - lightrag - INFO - Raw search results: 20 entities, 50 relations, 1 vector chunks
+2026-07-21 15:24:35,704 - lightrag - INFO - After truncation: 20 entities, 50 relations
+2026-07-21 15:24:35,705 - lightrag - INFO - Selecting 2 from 2 entity-related chunks by vector similarity
+2026-07-21 15:24:35,705 - lightrag - INFO - Find no additional relations-related chunks from 50 relations
+2026-07-21 15:24:35,705 - lightrag - INFO - Round-robin merged chunks: 3 -> 2 (deduplicated 1)
+2026-07-21 15:24:35,708 - lightrag - WARNING - Rerank is enabled but no rerank model is configured. Please set up a rerank model or set enable_rerank=False in query parameters.
+2026-07-21 15:24:35,709 - lightrag - INFO - Final context: 20 entities, 50 relations, 2 chunks
+2026-07-21 15:24:35,710 - lightrag - INFO - Final chunks S+F/O: E11/1 E11/2
+2026-07-21 15:24:35,714 - lightrag - INFO - query LLM func: 4 new workers initialized (Timeouts: Func: 240s, Worker: 480s, Health Check: 495s)
+2026-07-21 15:24:40,411 - lightrag - INFO -  == LLM cache == saving: mix:query:6eabdf4104bf54b0d020ea2e98841465
+2026-07-21 15:24:40,414 - lightrag - INFO - Successfully finalized 12 storages
+2026-07-21 15:26:12,756 - uvicorn.error - INFO - Shutting down
+2026-07-21 15:26:12,872 - uvicorn.error - INFO - Waiting for application shutdown.
+2026-07-21 15:26:12,872 - lightrag - INFO - Successfully finalized 12 storages
+2026-07-21 15:26:12,873 - uvicorn.error - INFO - Application shutdown complete.
+2026-07-21 15:26:12,873 - uvicorn.error - INFO - Finished server process [22504]
+2026-07-21 15:26:16,932 - lightrag - INFO - OpenAI LLM Options: {}
+2026-07-21 15:26:17,706 - lightrag - INFO - Embedding config: binding=openai model=openai/text-embedding-3-small embedding_dim=1536 max_token_size=8192
+2026-07-21 15:26:17,706 - lightrag - INFO - Send embedding dimension: False by env var (dimensions=1536, has_param=True, binding=openai)
+2026-07-21 15:26:17,706 - lightrag - INFO - Embedding max_token_size: 8192 (from openai provider default)
+2026-07-21 15:26:17,706 - lightrag - INFO - Reranking is disabled
+2026-07-21 15:26:18,142 - lightrag - INFO - [] Loaded graph from C:\Users\Sade\repos\Role-Duty\data\graph_rag\graph_chunk_entity_relation.graphml with 24 nodes, 50 edges
+2026-07-21 15:26:18,147 - lightrag - INFO - Role LLM Configuration (initialized):
+2026-07-21 15:26:18,147 - lightrag - INFO -  - extract: openai/qwen/qwen3-coder-30b-a3b-instruct, host=https://openrouter.ai/api/v1, max_async=4, timeout=240
+2026-07-21 15:26:18,147 - lightrag - INFO -  - keyword: openai/qwen/qwen3-coder-30b-a3b-instruct, host=https://openrouter.ai/api/v1, max_async=4, timeout=240
+2026-07-21 15:26:18,147 - lightrag - INFO -  - query: openai/qwen/qwen3-coder-30b-a3b-instruct, host=https://openrouter.ai/api/v1, max_async=4, timeout=240
+2026-07-21 15:26:18,148 - lightrag - INFO -  - vlm: openai/qwen/qwen3-coder-30b-a3b-instruct, host=https://openrouter.ai/api/v1, max_async=4, timeout=240
+2026-07-21 15:26:18,148 - lightrag - INFO - Role LLM Option:
+2026-07-21 15:26:18,148 - lightrag - INFO -  - extract: OpenAI {}
+2026-07-21 15:26:18,148 - lightrag - INFO -  - keyword: OpenAI {}
+2026-07-21 15:26:18,148 - lightrag - INFO -  - query: OpenAI {}
+2026-07-21 15:26:18,148 - lightrag - INFO -  - vlm: OpenAI {}
+2026-07-21 15:26:18,200 - lightrag - INFO - WebUI assets mounted at /webui
+2026-07-21 15:26:18,228 - uvicorn.error - INFO - Started server process [22032]
+2026-07-21 15:26:18,229 - uvicorn.error - INFO - Waiting for application startup.
+2026-07-21 15:26:18,229 - lightrag - INFO - [] Process 22032 KV load full_docs with 1 records
+2026-07-21 15:26:18,230 - lightrag - INFO - [] Process 22032 KV load text_chunks with 2 records
+2026-07-21 15:26:18,230 - lightrag - INFO - [] Process 22032 KV load full_entities with 1 records
+2026-07-21 15:26:18,231 - lightrag - INFO - [] Process 22032 KV load full_relations with 1 records
+2026-07-21 15:26:18,231 - lightrag - INFO - [] Process 22032 KV load entity_chunks with 24 records
+2026-07-21 15:26:18,231 - lightrag - INFO - [] Process 22032 KV load relation_chunks with 50 records
+2026-07-21 15:26:18,245 - lightrag - INFO - [] Process 22032 KV load llm_response_cache with 9 records
+2026-07-21 15:26:18,246 - lightrag - INFO - [] Process 22032 doc status load doc_status with 1 records
+2026-07-21 15:26:18,247 - uvicorn.error - INFO - Application startup complete.
+2026-07-21 15:26:18,248 - uvicorn.error - INFO - Uvicorn running on http://0.0.0.0:9621 (Press CTRL+C to quit)
+2026-07-21 15:26:23,237 - uvicorn.access - INFO - 127.0.0.1:1669 - "GET / HTTP/1.1" 307
+2026-07-21 15:26:23,669 - uvicorn.access - INFO - 127.0.0.1:2676 - "GET /auth-status HTTP/1.1" 200
+2026-07-21 15:26:24,166 - uvicorn.access - INFO - 127.0.0.1:2676 - "GET /docs?theme=dark HTTP/1.1" 200
+2026-07-21 15:26:24,295 - uvicorn.access - INFO - 127.0.0.1:2676 - "GET /openapi.json HTTP/1.1" 200
+2026-07-21 15:27:36,474 - lightrag - INFO - [] Graph truncated: found 20 nodes within max_depth 3
+2026-07-21 15:27:36,475 - lightrag - INFO - [] Subgraph query successful | Node count: 20 | Edge count: 47
+2026-07-21 15:27:36,477 - uvicorn.access - INFO - 127.0.0.1:7043 - "GET /graphs?label=Warehouse%20Inventory%20Specialist&max_depth=3&max_nodes=1000 HTTP/1.1" 200
+2026-07-21 15:28:06,966 - uvicorn.access - INFO - 127.0.0.1:11956 - "GET /graph/label/popular?limit=300 HTTP/1.1" 200
+2026-07-21 15:28:06,968 - lightrag - INFO - [] Subgraph query successful | Node count: 24 | Edge count: 50
+2026-07-21 15:28:06,970 - uvicorn.access - INFO - 127.0.0.1:11956 - "GET /graphs?label=*&max_depth=3&max_nodes=1000 HTTP/1.1" 200
+2026-07-21 15:28:06,995 - lightrag - INFO - [] Subgraph query successful | Node count: 24 | Edge count: 50
+2026-07-21 15:28:06,997 - uvicorn.access - INFO - 127.0.0.1:11956 - "GET /graphs?label=*&max_depth=3&max_nodes=1000 HTTP/1.1" 200
+2026-07-21 15:32:56,152 - lightrag - INFO - [] Loaded graph from data\graph_rag\graph_chunk_entity_relation.graphml with 24 nodes, 50 edges
+2026-07-21 15:32:56,159 - lightrag - INFO - Role LLM Configuration (initialized):
+2026-07-21 15:32:56,159 - lightrag - INFO -  - extract: None/None, host=None, max_async=4, timeout=240
+2026-07-21 15:32:56,159 - lightrag - INFO -  - keyword: None/None, host=None, max_async=4, timeout=240
+2026-07-21 15:32:56,159 - lightrag - INFO -  - query: None/None, host=None, max_async=4, timeout=240
+2026-07-21 15:32:56,160 - lightrag - INFO -  - vlm: None/None, host=None, max_async=4, timeout=240
+2026-07-21 15:32:56,160 - lightrag - INFO - [] Process 14732 KV load full_docs with 1 records
+2026-07-21 15:32:56,161 - lightrag - INFO - [] Process 14732 KV load text_chunks with 2 records
+2026-07-21 15:32:56,161 - lightrag - INFO - [] Process 14732 KV load full_entities with 1 records
+2026-07-21 15:32:56,161 - lightrag - INFO - [] Process 14732 KV load full_relations with 1 records
+2026-07-21 15:32:56,162 - lightrag - INFO - [] Process 14732 KV load entity_chunks with 24 records
+2026-07-21 15:32:56,162 - lightrag - INFO - [] Process 14732 KV load relation_chunks with 50 records
+2026-07-21 15:32:56,164 - lightrag - INFO - [] Process 14732 KV load llm_response_cache with 9 records
+2026-07-21 15:32:56,164 - lightrag - INFO - [] Process 14732 doc status load doc_status with 1 records
+2026-07-21 15:32:56,166 - lightrag - INFO - keyword LLM func: 4 new workers initialized (Timeouts: Func: 240s, Worker: 480s, Health Check: 495s)
+2026-07-21 15:32:59,116 - lightrag - INFO -  == LLM cache == saving: mix:keywords:d7ce16bac6ec7316a59644447dd231e7
+2026-07-21 15:32:59,117 - lightrag - INFO - Embedding func: 8 new workers initialized (Timeouts: Func: 30s, Worker: 60s, Health Check: 75s)
+2026-07-21 15:32:59,748 - lightrag - INFO - Query nodes: Warehouse Inventory Specialist, German (top_k:40, cosine:0.2)
+2026-07-21 15:32:59,752 - lightrag - INFO - Local query: 13 entites, 44 relations
+2026-07-21 15:32:59,753 - lightrag - INFO - Query edges: job description, role responsibility, employment position (top_k:40, cosine:0.2)
+2026-07-21 15:32:59,755 - lightrag - INFO - Global query: 16 entites, 40 relations
+2026-07-21 15:32:59,755 - lightrag - INFO - Naive query: 1 chunks (chunk_top_k:20 cosine:0.2)
+2026-07-21 15:32:59,756 - lightrag - INFO - Raw search results: 17 entities, 45 relations, 1 vector chunks
+2026-07-21 15:32:59,758 - lightrag - INFO - After truncation: 17 entities, 45 relations
+2026-07-21 15:32:59,759 - lightrag - INFO - Selecting 2 from 2 entity-related chunks by vector similarity
+2026-07-21 15:32:59,759 - lightrag - INFO - Find no additional relations-related chunks from 45 relations
+2026-07-21 15:32:59,759 - lightrag - INFO - Round-robin merged chunks: 3 -> 2 (deduplicated 1)
+2026-07-21 15:32:59,762 - lightrag - WARNING - Rerank is enabled but no rerank model is configured. Please set up a rerank model or set enable_rerank=False in query parameters.
+2026-07-21 15:32:59,763 - lightrag - INFO - Final context: 17 entities, 45 relations, 2 chunks
+2026-07-21 15:32:59,763 - lightrag - INFO - Final chunks S+F/O: E11/1 E8/2
+2026-07-21 15:32:59,767 - lightrag - INFO - query LLM func: 4 new workers initialized (Timeouts: Func: 240s, Worker: 480s, Health Check: 495s)
+2026-07-21 15:33:26,183 - lightrag - INFO -  == LLM cache == saving: mix:query:6eaa4a6efc576fb7c697968207c5b512
+2026-07-21 15:33:26,187 - lightrag - INFO - Successfully finalized 12 storages
+2026-07-21 15:40:31,078 - lightrag - INFO - [] Loaded graph from data\graph_rag\graph_chunk_entity_relation.graphml with 24 nodes, 50 edges
+2026-07-21 15:40:31,084 - lightrag - INFO - Role LLM Configuration (initialized):
+2026-07-21 15:40:31,084 - lightrag - INFO -  - extract: None/None, host=None, max_async=4, timeout=240
+2026-07-21 15:40:31,084 - lightrag - INFO -  - keyword: None/None, host=None, max_async=4, timeout=240
+2026-07-21 15:40:31,084 - lightrag - INFO -  - query: None/None, host=None, max_async=4, timeout=240
+2026-07-21 15:40:31,084 - lightrag - INFO -  - vlm: None/None, host=None, max_async=4, timeout=240
+2026-07-21 15:40:31,085 - lightrag - INFO - [] Process 11820 KV load full_docs with 1 records
+2026-07-21 15:40:31,085 - lightrag - INFO - [] Process 11820 KV load text_chunks with 2 records
+2026-07-21 15:40:31,086 - lightrag - INFO - [] Process 11820 KV load full_entities with 1 records
+2026-07-21 15:40:31,086 - lightrag - INFO - [] Process 11820 KV load full_relations with 1 records
+2026-07-21 15:40:31,086 - lightrag - INFO - [] Process 11820 KV load entity_chunks with 24 records
+2026-07-21 15:40:31,087 - lightrag - INFO - [] Process 11820 KV load relation_chunks with 50 records
+2026-07-21 15:40:31,106 - lightrag - INFO - [] Process 11820 KV load llm_response_cache with 11 records
+2026-07-21 15:40:31,106 - lightrag - INFO - [] Process 11820 doc status load doc_status with 1 records
+2026-07-21 15:40:31,107 - lightrag - INFO - Embedding func: 8 new workers initialized (Timeouts: Func: 30s, Worker: 60s, Health Check: 75s)
+2026-07-21 15:40:33,863 - lightrag - INFO - Query nodes: Warehouse Inventory Specialist, German (top_k:40, cosine:0.2)
+2026-07-21 15:40:33,868 - lightrag - INFO - Local query: 13 entites, 44 relations
+2026-07-21 15:40:33,868 - lightrag - INFO - Query edges: job description, role responsibility, employment position (top_k:40, cosine:0.2)
+2026-07-21 15:40:33,871 - lightrag - INFO - Global query: 16 entites, 40 relations
+2026-07-21 15:40:33,871 - lightrag - INFO - Naive query: 1 chunks (chunk_top_k:20 cosine:0.2)
+2026-07-21 15:40:33,871 - lightrag - INFO - Raw search results: 17 entities, 45 relations, 1 vector chunks
+2026-07-21 15:40:33,874 - lightrag - INFO - After truncation: 17 entities, 45 relations
+2026-07-21 15:40:33,875 - lightrag - INFO - Selecting 2 from 2 entity-related chunks by vector similarity
+2026-07-21 15:40:33,876 - lightrag - INFO - Find no additional relations-related chunks from 45 relations
+2026-07-21 15:40:33,876 - lightrag - INFO - Round-robin merged chunks: 3 -> 2 (deduplicated 1)
+2026-07-21 15:40:33,878 - lightrag - WARNING - Rerank is enabled but no rerank model is configured. Please set up a rerank model or set enable_rerank=False in query parameters.
+2026-07-21 15:40:33,879 - lightrag - INFO - Final context: 17 entities, 45 relations, 2 chunks
+2026-07-21 15:40:33,879 - lightrag - INFO - Final chunks S+F/O: E11/1 E8/2
+2026-07-21 15:40:33,884 - lightrag - INFO -  == LLM cache == Query cache hit, using cached response as query result
+2026-07-21 15:40:33,885 - lightrag - INFO - Successfully finalized 12 storages
