@@ -237,3 +237,120 @@
 2026-07-21 15:40:33,879 - lightrag - INFO - Final chunks S+F/O: E11/1 E8/2
 2026-07-21 15:40:33,884 - lightrag - INFO -  == LLM cache == Query cache hit, using cached response as query result
 2026-07-21 15:40:33,885 - lightrag - INFO - Successfully finalized 12 storages
+2026-07-21 19:18:35,647 - lightrag - INFO - OpenAI LLM Options: {}
+2026-07-21 19:18:36,742 - lightrag - INFO - Embedding config: binding=openai model=openai/text-embedding-3-small embedding_dim=1536 max_token_size=8192
+2026-07-21 19:18:36,743 - lightrag - INFO - Send embedding dimension: False by env var (dimensions=1536, has_param=True, binding=openai)
+2026-07-21 19:18:36,743 - lightrag - INFO - Embedding max_token_size: 8192 (from openai provider default)
+2026-07-21 19:18:36,743 - lightrag - INFO - Reranking is disabled
+2026-07-21 19:18:37,358 - lightrag - INFO - [] Loaded graph from C:\Users\Sade\repos\Role-Duty\data\graph_rag\graph_chunk_entity_relation.graphml with 24 nodes, 50 edges
+2026-07-21 19:18:37,367 - lightrag - INFO - Role LLM Configuration (initialized):
+2026-07-21 19:18:37,367 - lightrag - INFO -  - extract: openai/qwen/qwen3-coder-30b-a3b-instruct, host=https://openrouter.ai/api/v1, max_async=4, timeout=240
+2026-07-21 19:18:37,368 - lightrag - INFO -  - keyword: openai/qwen/qwen3-coder-30b-a3b-instruct, host=https://openrouter.ai/api/v1, max_async=4, timeout=240
+2026-07-21 19:18:37,368 - lightrag - INFO -  - query: openai/qwen/qwen3-coder-30b-a3b-instruct, host=https://openrouter.ai/api/v1, max_async=4, timeout=240
+2026-07-21 19:18:37,368 - lightrag - INFO -  - vlm: openai/qwen/qwen3-coder-30b-a3b-instruct, host=https://openrouter.ai/api/v1, max_async=4, timeout=240
+2026-07-21 19:18:37,368 - lightrag - INFO - Role LLM Option:
+2026-07-21 19:18:37,368 - lightrag - INFO -  - extract: OpenAI {}
+2026-07-21 19:18:37,369 - lightrag - INFO -  - keyword: OpenAI {}
+2026-07-21 19:18:37,369 - lightrag - INFO -  - query: OpenAI {}
+2026-07-21 19:18:37,369 - lightrag - INFO -  - vlm: OpenAI {}
+2026-07-21 19:18:37,410 - lightrag - INFO - WebUI assets mounted at /webui
+2026-07-21 19:18:37,452 - uvicorn.error - INFO - Started server process [16116]
+2026-07-21 19:18:37,453 - uvicorn.error - INFO - Waiting for application startup.
+2026-07-21 19:18:37,454 - lightrag - INFO - [] Process 16116 KV load full_docs with 1 records
+2026-07-21 19:18:37,454 - lightrag - INFO - [] Process 16116 KV load text_chunks with 2 records
+2026-07-21 19:18:37,455 - lightrag - INFO - [] Process 16116 KV load full_entities with 1 records
+2026-07-21 19:18:37,456 - lightrag - INFO - [] Process 16116 KV load full_relations with 1 records
+2026-07-21 19:18:37,456 - lightrag - INFO - [] Process 16116 KV load entity_chunks with 24 records
+2026-07-21 19:18:37,457 - lightrag - INFO - [] Process 16116 KV load relation_chunks with 50 records
+2026-07-21 19:18:37,459 - lightrag - INFO - [] Process 16116 KV load llm_response_cache with 11 records
+2026-07-21 19:18:37,460 - lightrag - INFO - [] Process 16116 doc status load doc_status with 1 records
+2026-07-21 19:18:37,461 - uvicorn.error - INFO - Application startup complete.
+2026-07-21 19:18:37,461 - uvicorn.error - INFO - Uvicorn running on http://0.0.0.0:9621 (Press CTRL+C to quit)
+2026-07-21 19:18:59,625 - uvicorn.access - INFO - 127.0.0.1:2765 - "GET / HTTP/1.1" 307
+2026-07-21 19:18:59,692 - uvicorn.access - INFO - 127.0.0.1:2765 - "GET /webui/assets/index-DnPVhc7x.js HTTP/1.1" 304
+2026-07-21 19:18:59,694 - uvicorn.access - INFO - 127.0.0.1:2765 - "GET /webui/assets/index-DocW-KSH.css HTTP/1.1" 304
+2026-07-21 19:18:59,696 - uvicorn.access - INFO - 127.0.0.1:2765 - "GET /webui/assets/chunk-QTnfLwEv.js HTTP/1.1" 304
+2026-07-21 19:18:59,698 - uvicorn.access - INFO - 127.0.0.1:2765 - "GET /webui/assets/src-DWlNNfc5.js HTTP/1.1" 304
+2026-07-21 19:18:59,700 - uvicorn.access - INFO - 127.0.0.1:2765 - "GET /webui/assets/chunk-CSCIHK7Q-DGtgSxmY.js HTTP/1.1" 304
+2026-07-21 19:18:59,702 - uvicorn.access - INFO - 127.0.0.1:2765 - "GET /webui/assets/dist-BExdoQxQ.js HTTP/1.1" 304
+2026-07-21 19:18:59,704 - uvicorn.access - INFO - 127.0.0.1:2765 - "GET /webui/assets/chunk-5ZQYHXKU-CkER5msB.js HTTP/1.1" 304
+2026-07-21 19:18:59,706 - uvicorn.access - INFO - 127.0.0.1:2765 - "GET /webui/assets/chunk-O5CBEL6O-Dby7T2LG.js HTTP/1.1" 304
+2026-07-21 19:18:59,708 - uvicorn.access - INFO - 127.0.0.1:2765 - "GET /webui/assets/path-BWPyau1x.js HTTP/1.1" 304
+2026-07-21 19:18:59,710 - uvicorn.access - INFO - 127.0.0.1:2765 - "GET /webui/assets/array-BifhSqXX.js HTTP/1.1" 304
+2026-07-21 19:18:59,713 - uvicorn.access - INFO - 127.0.0.1:2765 - "GET /webui/assets/line-B0KKq2N_.js HTTP/1.1" 304
+2026-07-21 19:18:59,715 - uvicorn.access - INFO - 127.0.0.1:2765 - "GET /webui/assets/chunk-L5ZTLDWV-wdSumQ3D.js HTTP/1.1" 304
+2026-07-21 19:18:59,718 - uvicorn.access - INFO - 127.0.0.1:2765 - "GET /webui/assets/chunk-NZK2D7GU-BP4v2TD5.js HTTP/1.1" 304
+2026-07-21 19:18:59,720 - uvicorn.access - INFO - 127.0.0.1:2765 - "GET /webui/assets/rough.esm-CSKSodPl.js HTTP/1.1" 304
+2026-07-21 19:18:59,723 - uvicorn.access - INFO - 127.0.0.1:2765 - "GET /webui/assets/chunk-3OPIFGDE-Cqs4cZpM.js HTTP/1.1" 304
+2026-07-21 19:18:59,725 - uvicorn.access - INFO - 127.0.0.1:2765 - "GET /webui/assets/chunk-BSJP7CBP-D8Ua6mpo.js HTTP/1.1" 304
+2026-07-21 19:19:00,103 - uvicorn.access - INFO - 127.0.0.1:6026 - "GET /auth-status HTTP/1.1" 200
+2026-07-21 19:19:00,643 - lightrag - INFO - [] Subgraph query successful | Node count: 24 | Edge count: 50
+2026-07-21 19:19:00,645 - uvicorn.access - INFO - 127.0.0.1:6026 - "GET /graphs?label=*&max_depth=3&max_nodes=1000 HTTP/1.1" 200
+2026-07-21 19:19:00,651 - uvicorn.access - INFO - 127.0.0.1:6026 - "GET /docs?theme=dark HTTP/1.1" 200
+2026-07-21 19:19:00,690 - uvicorn.access - INFO - 127.0.0.1:6026 - "GET /static/swagger-ui/swagger-ui.css HTTP/1.1" 304
+2026-07-21 19:19:00,691 - uvicorn.access - INFO - 127.0.0.1:2765 - "GET /static/swagger-ui/swagger-ui-bundle.js HTTP/1.1" 304
+2026-07-21 19:19:00,844 - uvicorn.access - INFO - 127.0.0.1:2765 - "GET /openapi.json HTTP/1.1" 200
+2026-07-21 20:03:53,135 - lightrag - INFO - [] Loaded graph from data\graph_rag\graph_chunk_entity_relation.graphml with 24 nodes, 50 edges
+2026-07-21 20:03:53,176 - lightrag - INFO - Role LLM Configuration (initialized):
+2026-07-21 20:03:53,177 - lightrag - INFO -  - extract: None/None, host=None, max_async=4, timeout=240
+2026-07-21 20:03:53,177 - lightrag - INFO -  - keyword: None/None, host=None, max_async=4, timeout=240
+2026-07-21 20:03:53,177 - lightrag - INFO -  - query: None/None, host=None, max_async=4, timeout=240
+2026-07-21 20:03:53,177 - lightrag - INFO -  - vlm: None/None, host=None, max_async=4, timeout=240
+2026-07-21 20:03:53,192 - lightrag - INFO - [] Process 16132 KV load full_docs with 1 records
+2026-07-21 20:03:53,206 - lightrag - INFO - [] Process 16132 KV load text_chunks with 2 records
+2026-07-21 20:03:53,218 - lightrag - INFO - [] Process 16132 KV load full_entities with 1 records
+2026-07-21 20:03:53,231 - lightrag - INFO - [] Process 16132 KV load full_relations with 1 records
+2026-07-21 20:03:53,242 - lightrag - INFO - [] Process 16132 KV load entity_chunks with 24 records
+2026-07-21 20:03:53,255 - lightrag - INFO - [] Process 16132 KV load relation_chunks with 50 records
+2026-07-21 20:03:53,269 - lightrag - INFO - [] Process 16132 KV load llm_response_cache with 11 records
+2026-07-21 20:03:53,282 - lightrag - INFO - [] Process 16132 doc status load doc_status with 1 records
+2026-07-21 20:03:53,284 - lightrag - INFO - keyword LLM func: 4 new workers initialized (Timeouts: Func: 240s, Worker: 480s, Health Check: 495s)
+2026-07-21 20:03:56,487 - lightrag - INFO -  == LLM cache == saving: hybrid:keywords:e99c6c83235d2859e040f2cbfa89c1eb
+2026-07-21 20:03:56,487 - lightrag - INFO - Embedding func: 8 new workers initialized (Timeouts: Func: 30s, Worker: 60s, Health Check: 75s)
+2026-07-21 20:03:57,339 - lightrag - INFO - Query nodes: Store Manager (top_k:40, cosine:0.2)
+2026-07-21 20:03:57,344 - lightrag - INFO - Local query: 19 entites, 47 relations
+2026-07-21 20:03:57,345 - lightrag - INFO - Query edges: job responsibilities, role definition (top_k:40, cosine:0.2)
+2026-07-21 20:03:57,348 - lightrag - INFO - Global query: 17 entites, 40 relations
+2026-07-21 20:03:57,349 - lightrag - INFO - Raw search results: 19 entities, 47 relations, 0 vector chunks
+2026-07-21 20:03:57,351 - lightrag - INFO - After truncation: 19 entities, 47 relations
+2026-07-21 20:03:57,353 - lightrag - INFO - Selecting 2 from 2 entity-related chunks by vector similarity
+2026-07-21 20:03:57,353 - lightrag - INFO - Find no additional relations-related chunks from 47 relations
+2026-07-21 20:03:57,353 - lightrag - INFO - Round-robin merged chunks: 2 -> 2 (deduplicated 0)
+2026-07-21 20:03:57,355 - lightrag - WARNING - Rerank is enabled but no rerank model is configured. Please set up a rerank model or set enable_rerank=False in query parameters.
+2026-07-21 20:03:57,356 - lightrag - INFO - Final context: 19 entities, 47 relations, 2 chunks
+2026-07-21 20:03:57,356 - lightrag - INFO - Final chunks S+F/O: E11/1 E10/2
+2026-07-21 20:03:57,361 - lightrag - INFO - query LLM func: 4 new workers initialized (Timeouts: Func: 240s, Worker: 480s, Health Check: 495s)
+2026-07-21 20:04:08,703 - lightrag - INFO -  == LLM cache == saving: hybrid:query:b348594db5d8a03953319cb3924fc903
+2026-07-21 20:04:08,706 - lightrag - INFO - Successfully finalized 12 storages
+2026-07-22 11:13:45,340 - lightrag - INFO - [] Loaded graph from data\graph_rag\graph_chunk_entity_relation.graphml with 24 nodes, 50 edges
+2026-07-22 11:13:45,398 - lightrag - INFO - Role LLM Configuration (initialized):
+2026-07-22 11:13:45,398 - lightrag - INFO -  - extract: None/None, host=None, max_async=4, timeout=240
+2026-07-22 11:13:45,398 - lightrag - INFO -  - keyword: None/None, host=None, max_async=4, timeout=240
+2026-07-22 11:13:45,398 - lightrag - INFO -  - query: None/None, host=None, max_async=4, timeout=240
+2026-07-22 11:13:45,398 - lightrag - INFO -  - vlm: None/None, host=None, max_async=4, timeout=240
+2026-07-22 11:13:45,415 - lightrag - INFO - [] Process 7676 KV load full_docs with 1 records
+2026-07-22 11:13:45,429 - lightrag - INFO - [] Process 7676 KV load text_chunks with 2 records
+2026-07-22 11:13:45,444 - lightrag - INFO - [] Process 7676 KV load full_entities with 1 records
+2026-07-22 11:13:45,458 - lightrag - INFO - [] Process 7676 KV load full_relations with 1 records
+2026-07-22 11:13:45,475 - lightrag - INFO - [] Process 7676 KV load entity_chunks with 24 records
+2026-07-22 11:13:45,490 - lightrag - INFO - [] Process 7676 KV load relation_chunks with 50 records
+2026-07-22 11:13:45,506 - lightrag - INFO - [] Process 7676 KV load llm_response_cache with 13 records
+2026-07-22 11:13:45,520 - lightrag - INFO - [] Process 7676 doc status load doc_status with 1 records
+2026-07-22 11:13:45,523 - lightrag - INFO - keyword LLM func: 4 new workers initialized (Timeouts: Func: 240s, Worker: 480s, Health Check: 495s)
+2026-07-22 11:13:50,339 - lightrag - INFO -  == LLM cache == saving: hybrid:keywords:4bd9766568a4d1eb25929ec51e022f11
+2026-07-22 11:13:50,339 - lightrag - WARNING - low_level_keywords is empty
+2026-07-22 11:13:50,339 - lightrag - INFO - Embedding func: 8 new workers initialized (Timeouts: Func: 30s, Worker: 60s, Health Check: 75s)
+2026-07-22 11:13:51,213 - lightrag - INFO - Query edges: duty store, manager role, responsibilities (top_k:40, cosine:0.2)
+2026-07-22 11:13:51,216 - lightrag - INFO - Global query: 17 entites, 40 relations
+2026-07-22 11:13:51,217 - lightrag - INFO - Raw search results: 17 entities, 40 relations, 0 vector chunks
+2026-07-22 11:13:51,219 - lightrag - INFO - After truncation: 17 entities, 40 relations
+2026-07-22 11:13:51,221 - lightrag - INFO - Selecting 2 from 2 entity-related chunks by vector similarity
+2026-07-22 11:13:51,222 - lightrag - INFO - Find no additional relations-related chunks from 40 relations
+2026-07-22 11:13:51,222 - lightrag - INFO - Round-robin merged chunks: 2 -> 2 (deduplicated 0)
+2026-07-22 11:13:51,224 - lightrag - INFO - Rerank func: 4 new workers initialized (Timeouts: Func: 30s, Worker: 60s, Health Check: 75s)
+2026-07-22 11:13:51,793 - lightrag - INFO - Successfully reranked: 2 chunks from 2 original chunks
+2026-07-22 11:13:51,794 - lightrag - INFO - Final context: 17 entities, 40 relations, 2 chunks
+2026-07-22 11:13:51,795 - lightrag - INFO - Final chunks S+F/O: E11/1 E8/2
+2026-07-22 11:13:51,803 - lightrag - INFO - query LLM func: 4 new workers initialized (Timeouts: Func: 240s, Worker: 480s, Health Check: 495s)
+2026-07-22 11:13:56,720 - lightrag - INFO -  == LLM cache == saving: hybrid:query:d51182b785d23866b7056ad4c1bc172f
+2026-07-22 11:13:56,723 - lightrag - INFO - Successfully finalized 12 storages

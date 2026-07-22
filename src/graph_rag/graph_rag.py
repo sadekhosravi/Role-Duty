@@ -42,6 +42,7 @@ from docling.pipeline.standard_pdf_pipeline import StandardPdfPipeline
 from lightrag import LightRAG, QueryParam
 from lightrag.kg.shared_storage import initialize_pipeline_status
 from lightrag.llm.openai import openai_complete_if_cache, openai_embed
+from lightrag.rerank import cohere_rerank
 from lightrag.utils import EmbeddingFunc, setup_logger
 
 load_dotenv()
@@ -67,6 +68,26 @@ EMBEDDING_MAX_TOKENS = int(os.environ.get("EMBEDDING_MAX_TOKEN_SIZE", "8192"))
 
 # Where LightRAG persists its graph + NanoVectorDB files (created automatically).
 WORKING_DIR = Path(os.environ.get("GRAPH_RAG_WORKING_DIR", "data/graph_rag"))
+
+# Rerank calls. AFTER graph + vector search gathers candidate chunks, a reranker
+# re-scores each chunk against the actual question and reorders them, so the most
+# relevant text reaches the LLM first (and weak chunks can be dropped). Unlike
+# embeddings, OpenRouter DOES serve reranking via a Cohere-compatible /rerank
+# endpoint, so we reuse the same OPENROUTER_API_KEY and base host by default.
+#   - RERANK=false turns the whole step off (retrieval order is used as-is).
+#   - MIN_RERANK_SCORE drops chunks scoring below it (0..1). Start at 0.0 while
+#     testing (reorder only, drop nothing); raise it later to prune weak chunks.
+RERANK_ENABLED = os.environ.get("RERANK", "true").lower() == "true"
+RERANK_MODEL = os.environ.get("RERANK_MODEL", "cohere/rerank-v3.5")
+RERANK_API_KEY = os.environ.get("RERANK_API_KEY") or LLM_API_KEY
+RERANK_BASE_URL = os.environ.get(
+    "RERANK_API_BASE_URL", "https://openrouter.ai/api/v1/rerank"
+)
+MIN_RERANK_SCORE = float(os.environ.get("MIN_RERANK_SCORE", "0.0"))
+
+# Citations. When on, answers end with a `### References` section naming the
+# source PDF(s) each fact came from (see query() for how this works).
+CITE_SOURCES = os.environ.get("CITE_SOURCES", "true").lower() == "true"
 
 
 # --- Extraction guidance: what the LLM should pull out during ingest -----------
@@ -155,6 +176,25 @@ async def _embedding_func(texts: list[str]):
     )
 
 
+async def _rerank_model_func(query, documents, top_n=None, **kwargs):
+    """LightRAG's rerank hook -> OpenRouter's Cohere-compatible /rerank endpoint.
+
+    LightRAG calls this after retrieval with the candidate chunk texts. The
+    built-in cohere_rerank helper POSTs {query, documents, top_n} and returns
+    [{"index", "relevance_score"}], which LightRAG uses to reorder and trim the
+    chunks (dropping any below MIN_RERANK_SCORE) before building the prompt.
+    """
+    return await cohere_rerank(
+        query=query,
+        documents=documents,
+        top_n=top_n,
+        model=RERANK_MODEL,
+        api_key=RERANK_API_KEY,
+        base_url=RERANK_BASE_URL,
+        **kwargs,
+    )
+
+
 async def build_rag() -> LightRAG:
     """Create + initialize a LightRAG instance backed by default file storage.
 
@@ -171,6 +211,10 @@ async def build_rag() -> LightRAG:
             max_token_size=EMBEDDING_MAX_TOKENS,
             func=_embedding_func,
         ),
+        # Rerank retrieved chunks by relevance before answering (see config above).
+        # When RERANK is off we pass None, so LightRAG skips the step entirely.
+        rerank_model_func=_rerank_model_func if RERANK_ENABLED else None,
+        min_rerank_score=MIN_RERANK_SCORE,
         # Tell the extractor what entities/relationships to pull out (see above).
         addon_params={"entity_types_guidance": EXTRACTION_GUIDANCE},
     )
@@ -237,10 +281,19 @@ async def query(question: str, mode: str = "hybrid") -> str:
       global - relationship-centric (broad themes)
       hybrid - local + global combined (default)
       mix    - hybrid graph retrieval plus naive vector search
+
+    Citations: LightRAG tags every retrieved chunk with the source PDF (the
+    file_paths we set at ingest) and its default answer prompt ends the reply
+    with a `### References` section listing those sources. `include_references`
+    turns that reference flow on so the answer says which document each fact
+    came from. To answer with no citations, set CITE_SOURCES=false.
     """
     rag = await build_rag()
     try:
-        return await rag.aquery(question, param=QueryParam(mode=mode))
+        return await rag.aquery(
+            question,
+            param=QueryParam(mode=mode, include_references=CITE_SOURCES),
+        )
     finally:
         await rag.finalize_storages()
 

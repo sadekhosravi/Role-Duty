@@ -16,7 +16,8 @@
       "Bash(.venv/Scripts/python.exe src/graph_rag/graph_rag.py remove --help)",
       "Bash(rm -rf data/graph_rag lightrag.log)",
       "Bash(PYTHONIOENCODING=utf-8 .venv/Scripts/python.exe src/graph_rag/graph_rag.py ingest data/raw/sample_role_duties_plain.pdf)",
-      "Bash(PYTHONIOENCODING=utf-8 timeout 110 .venv/Scripts/python.exe src/graph_rag/graph_rag.py query \"What roles are described in this document and what are their duties?\" --mode hybrid)"
+      "Bash(PYTHONIOENCODING=utf-8 timeout 110 .venv/Scripts/python.exe src/graph_rag/graph_rag.py query \"What roles are described in this document and what are their duties?\" --mode hybrid)",
+      "Bash(grep -v -E '\\\\.\\(lock|log\\)$')"
     ]
   }
 }
