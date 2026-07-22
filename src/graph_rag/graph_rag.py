@@ -4,9 +4,10 @@ Everything lives in this one file on purpose — parsing, ingestion, and queryin
 so it reads top to bottom as a single, learnable example.
 
 The pipeline has three steps, one function each:
-  1. parse_pdf() : PDF -> Docling StandardPdfPipeline -> HybridChunker chunks
-  2. ingest()    : chunks -> LightRAG (builds an entity/relationship graph)
-  3. query()     : a natural-language question -> answer grounded in the graph
+  1. parse_pdf() : PDF -> Docling StandardPdfPipeline -> Sections (per heading)
+  2. ingest()    : Sections -> LightRAG (each a citable doc in one shared graph)
+  3. query()     : a natural-language question -> answer grounded in the graph,
+                   with a `### References` section citing the exact PDF sections
 
 Storage is LightRAG's default file-based stack — NanoVectorDB for vectors,
 NetworkX for the graph, JSON for key/value — under GRAPH_RAG_WORKING_DIR.
@@ -29,6 +30,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
+from dataclasses import dataclass
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -40,6 +42,7 @@ from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling.pipeline.standard_pdf_pipeline import StandardPdfPipeline
 
 from lightrag import LightRAG, QueryParam
+from lightrag.base import DocStatus
 from lightrag.kg.shared_storage import initialize_pipeline_status
 from lightrag.llm.openai import openai_complete_if_cache, openai_embed
 from lightrag.rerank import cohere_rerank
@@ -86,8 +89,29 @@ RERANK_BASE_URL = os.environ.get(
 MIN_RERANK_SCORE = float(os.environ.get("MIN_RERANK_SCORE", "0.0"))
 
 # Citations. When on, answers end with a `### References` section naming the
-# source PDF(s) each fact came from (see query() for how this works).
+# source PDF(s) each fact came from (see query() for how this works). With
+# section referencing (see ingest), each reference is a PDF section, e.g.
+# "AMG.pdf › 2. Roles › 2.1 Manager".
 CITE_SOURCES = os.environ.get("CITE_SOURCES", "true").lower() == "true"
+
+# --- Optional: lift the "max 5 citations" cap in the answer prompt -------------
+#
+# LightRAG's default answer prompt instructs the model to list AT MOST 5
+# citations. That limit lives only in the prompt text (not in code), and the
+# reference list handed to the model is already uncapped — so raising it is a
+# one-line patch to the template, applied once here at import (before any query).
+# The model still lists only sections that actually supported the answer; you're
+# lifting the ceiling, not forcing a count. Uncomment to enable. The assert
+# guards against a silent no-op if a LightRAG upgrade changes the wording.
+#
+# from lightrag.prompt import PROMPTS
+# _CITATION_CAP = "Provide maximum of 5 most relevant citations."
+# assert _CITATION_CAP in PROMPTS["rag_response"], (
+#     "citation-cap text not found — LightRAG may have changed the prompt wording"
+# )
+# PROMPTS["rag_response"] = PROMPTS["rag_response"].replace(
+#     _CITATION_CAP, "Provide all relevant citations."
+# )
 
 
 # --- Extraction guidance: what the LLM should pull out during ingest -----------
@@ -112,16 +136,61 @@ Focus on roles, their duties, and how they connect. Ignore incidental details
 that are not about roles or their responsibilities."""
 
 
-# --- 1. Parse: PDF -> Docling StandardPdfPipeline -> structure-aware chunks -----
+# --- 1. Parse: PDF -> Docling StandardPdfPipeline -> per-section text -----------
 
-def parse_pdf(pdf_path: str | Path) -> list[str]:
-    """Extract a PDF into a list of structure-aware text chunks.
+@dataclass
+class Section:
+    """One citable unit of a PDF: text under a single heading path, on one page.
+
+    `headings` is the Docling heading hierarchy for this section, outermost
+    first, e.g. ("2. Roles", "2.1 Manager"). `page` is the (1-based) PDF page the
+    text sits on. `text` is every chunk under that heading+page, joined. At
+    ingest time (heading + page) becomes the citation label, so answers can cite
+    "sample.pdf › page 25 › Shift Supervisor" rather than just the whole PDF.
+    Grouping by page means a heading that spans pages yields one section per page.
+    """
+
+    headings: tuple[str, ...]
+    page: int | None
+    text: str
+
+
+def _normalize_heading(heading: str) -> str:
+    """Collapse whitespace so the same heading always yields the same label.
+
+    Citations are deduplicated on the exact label string, so stray spacing or
+    line breaks in a heading would otherwise split one section into two
+    references. Normalizing here keeps a section's citation stable.
+    """
+    return " ".join(heading.split())
+
+
+def _chunk_start_page(chunk) -> int | None:
+    """The first PDF page a chunk's content appears on, or None if unknown.
+
+    Docling records provenance for each chunk in `meta.doc_items[].prov[]`, and
+    each provenance entry carries a 1-based `page_no`. A chunk can straddle a
+    page break, so we take the smallest page number as its starting page.
+    """
+    pages = [
+        prov.page_no
+        for item in (chunk.meta.doc_items or [])
+        for prov in (item.prov or [])
+    ]
+    return min(pages) if pages else None
+
+
+def parse_pdf(pdf_path: str | Path) -> list[Section]:
+    """Extract a PDF into a list of Sections, one per heading path.
 
     Uses Docling's StandardPdfPipeline (deterministic text extraction plus
     layout + table-detection models — no OCR, no vision model, no GPU), then
-    HybridChunker to split the document along its natural structure. Each chunk
-    is 'contextualized' so it carries its section headings, which gives the
-    graph-extraction step cleaner, self-contained text to work from.
+    HybridChunker to split the document along its natural structure. Chunks are
+    'contextualized' (each carries its section headings) and then grouped by
+    that heading path: every chunk sharing the same headings becomes one
+    Section. HybridChunker yields chunks in document order, so sections keep
+    their original order too. Chunks with no heading fall under a single
+    empty-path section for that PDF.
     """
     pdf_path = Path(pdf_path)
     if not pdf_path.exists():
@@ -143,12 +212,23 @@ def parse_pdf(pdf_path: str | Path) -> list[str]:
     document = converter.convert(pdf_path).document
 
     chunker = HybridChunker()
-    chunks: list[str] = []
+    # Group by (heading path, page) — one citable section per heading per page.
+    # dict preserves first-seen order, so sections stay in document order.
+    grouped: dict[tuple[tuple[str, ...], int | None], list[str]] = {}
     for chunk in chunker.chunk(document):
         text = chunker.contextualize(chunk=chunk).strip()
-        if text:
-            chunks.append(text)
-    return chunks
+        if not text:
+            continue
+        headings = tuple(
+            h for h in (_normalize_heading(x) for x in (chunk.meta.headings or [])) if h
+        )
+        page = _chunk_start_page(chunk)
+        grouped.setdefault((headings, page), []).append(text)
+
+    return [
+        Section(headings=headings, page=page, text="\n\n".join(parts))
+        for (headings, page), parts in grouped.items()
+    ]
 
 
 # --- LightRAG wiring: route LLM + embeddings through OpenRouter -----------------
@@ -224,15 +304,57 @@ async def build_rag() -> LightRAG:
     return rag
 
 
-# --- 2. Ingest: chunks -> LightRAG graph ---------------------------------------
+# --- 2. Ingest: sections -> LightRAG graph -------------------------------------
+
+# Separator between the PDF name and its heading path in a citation label, e.g.
+# "AMG.pdf › 2. Roles › 2.1 Manager". Purely cosmetic — pick any glyph you like.
+LABEL_SEP = " › "
+
+
+def _section_label(pdf_name: str, page: int | None, headings: tuple[str, ...]) -> str:
+    """The citation label (LightRAG file_path) for one section of a PDF.
+
+    e.g. "sample.pdf › page 25 › Shift Supervisor". The page and heading parts
+    are each omitted when unknown, so a heading-less first page is just
+    "sample.pdf › page 1", and a page-less chunk is "sample.pdf › Overview".
+    """
+    parts = [pdf_name]
+    if page is not None:
+        parts.append(f"page {page}")
+    parts.extend(headings)
+    return LABEL_SEP.join(parts)
+
+
+async def _delete_pdf(rag: LightRAG, pdf_name: str) -> int:
+    """Delete every section-document ingested from a PDF. Returns the count.
+
+    Each PDF is stored as many section-documents with ids "{pdf}#0", "{pdf}#1",
+    … (see ingest), so removing a PDF means deleting all ids with that prefix.
+    We look them up from LightRAG's doc-status store across every status (a
+    half-processed doc still needs cleaning) and delete each one. LightRAG then
+    prunes entities/relationships that lose their last supporting source and
+    keeps those still cited by other sections or documents.
+    """
+    prefix = f"{pdf_name}#"
+    doc_ids: set[str] = set()
+    for status in DocStatus:
+        docs = await rag.get_docs_by_status(status)
+        doc_ids.update(doc_id for doc_id in docs if doc_id.startswith(prefix))
+    for doc_id in doc_ids:
+        await rag.adelete_by_doc_id(doc_id)
+    return len(doc_ids)
+
 
 async def ingest(path: str | Path) -> int:
-    """Ingest a single PDF or every PDF in a directory. Returns total chunks added.
+    """Ingest a single PDF or every PDF in a directory. Returns total sections added.
 
     Pass a .pdf file to ingest just that file, or a directory to ingest every
-    top-level *.pdf inside it. The graph is built once and all PDFs are inserted
-    into it. During insertion LightRAG uses the LLM to extract entities and
-    relationships from each chunk and merges them into a persistent graph on disk.
+    top-level *.pdf inside it. Each PDF is split into Sections (one per heading
+    path) and every section is inserted as its own LightRAG document, tagged with
+    a section-qualified file_path so answers can cite the exact section. During
+    insertion LightRAG uses the LLM to extract entities and relationships from
+    each section and merges them into one persistent graph on disk — the graph
+    stays global across sections, so cross-section reasoning is preserved.
     """
     path = Path(path)
     if path.is_dir():
@@ -248,23 +370,26 @@ async def ingest(path: str | Path) -> int:
     total = 0
     try:
         for pdf in pdfs:
-            chunks = parse_pdf(pdf)
-            if not chunks:
+            sections = parse_pdf(pdf)
+            if not sections:
                 print(f"  {pdf.name}: no text extracted, skipping")
                 continue
-            # Insert the PDF as ONE document, tagged with its file name as both
-            # the id and file_path so it has a stable identity for removal.
-            # We hand LightRAG the text assembled from our structure-aware
-            # HybridChunker chunks; LightRAG runs its full extract-and-merge
-            # pipeline over it to build the graph. (Passing the chunks as a list
-            # instead makes each a separate same-named document, and LightRAG
-            # drops all but the first as duplicates — which leaves the graph
-            # almost empty. Custom-chunk insertion extracts but never merges into
-            # the graph in this version, so it can't be used here either.)
-            full_text = "\n\n".join(chunks)
-            await rag.ainsert(full_text, ids=pdf.name, file_paths=pdf.name)
-            print(f"  {pdf.name}: {len(chunks)} chunks")
-            total += len(chunks)
+            # Re-ingesting? Drop this PDF's previous sections first. Section ids
+            # are positional, so if the PDF changed and produced fewer sections,
+            # old trailing ids would otherwise linger. A clean delete-then-insert
+            # keeps the overwrite semantics the single-doc version had.
+            await _delete_pdf(rag, pdf.name)
+            # Insert each section as its own document: unique positional id for
+            # removal, and a section-qualified file_path that becomes the
+            # citation label. Passing parallel lists to ainsert inserts them as
+            # distinct documents (distinct ids => no duplicate-drop), and
+            # LightRAG runs its full extract-and-merge pipeline over each.
+            texts = [section.text for section in sections]
+            ids = [f"{pdf.name}#{i}" for i in range(len(sections))]
+            file_paths = [_section_label(pdf.name, s.page, s.headings) for s in sections]
+            await rag.ainsert(texts, ids=ids, file_paths=file_paths)
+            print(f"  {pdf.name}: {len(sections)} sections")
+            total += len(sections)
     finally:
         await rag.finalize_storages()
     return total
@@ -301,20 +426,21 @@ async def query(question: str, mode: str = "hybrid") -> str:
 # --- Remove: drop everything that came from a given PDF ------------------------
 
 async def remove(pdf_name: str) -> str:
-    """Remove the document ingested from a given PDF. Returns a status message.
+    """Remove every section ingested from a given PDF. Returns a status message.
 
-    We ingest each PDF as one document whose id is its file name, so removal is
-    a direct delete by that id (a bare name like "AMG.pdf" or a path — only the
-    file name is used). LightRAG prunes any entities/relationships that no longer
-    have a supporting source, and keeps those still cited by other documents.
+    Each PDF is ingested as many section-documents (see ingest), so removal
+    deletes all of them by their shared "{pdf}#" id prefix (a bare name like
+    "AMG.pdf" or a path — only the file name is used).
     """
-    doc_id = Path(pdf_name).name
+    doc_name = Path(pdf_name).name
     rag = await build_rag()
     try:
-        result = await rag.adelete_by_doc_id(doc_id)
+        count = await _delete_pdf(rag, doc_name)
     finally:
         await rag.finalize_storages()
-    return f"{result.status}: {result.message}"
+    if count == 0:
+        return f"no sections found for {doc_name}"
+    return f"removed {count} section(s) from {doc_name}"
 
 
 # --- CLI -----------------------------------------------------------------------
@@ -342,7 +468,7 @@ def main() -> None:
 
     if args.command == "ingest":
         total = asyncio.run(ingest(args.path))
-        print(f"Done: {total} chunks added to the graph.")
+        print(f"Done: {total} sections added to the graph.")
     elif args.command == "remove":
         status = asyncio.run(remove(args.name))
         print(f"{Path(args.name).name}: {status}")
