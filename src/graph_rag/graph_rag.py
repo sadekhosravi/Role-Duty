@@ -29,11 +29,14 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
 from dotenv import load_dotenv
+from rank_bm25 import BM25Okapi
 
 from docling.chunking import HybridChunker
 from docling.datamodel.base_models import InputFormat
@@ -417,7 +420,19 @@ async def query(question: str, mode: str = "hybrid") -> str:
     try:
         return await rag.aquery(
             question,
-            param=QueryParam(mode=mode, include_references=CITE_SOURCES),
+            param=QueryParam(
+                mode=mode,
+                include_references=CITE_SOURCES,
+                # Retrieve-only mode for agentic RAG. Set only_need_context=True to
+                # get LightRAG's retrieved context (the multi-hop subgraph + chunks
+                # + citation labels) WITHOUT generating an answer — then let an
+                # outer agent/synthesis LLM write the final answer from this plus
+                # other tools (keyword/web search). The graph traversal that gathers
+                # the multi-hop context is algorithmic (no LLM); only the small
+                # keyword-extraction step remains (skip it with mode="naive"). Note:
+                # with this on, aquery returns the CONTEXT string, not an answer.
+                # only_need_context=True,
+            ),
         )
     finally:
         await rag.finalize_storages()
@@ -443,6 +458,87 @@ async def remove(pdf_name: str) -> str:
     return f"removed {count} section(s) from {doc_name}"
 
 
+# --- Keyword search: BM25 over the indexed chunks ------------------------------
+#
+# LightRAG gives us semantic (embedding) + graph retrieval, but not exact-term
+# matching — the names, codes, and acronyms that vector search can miss. BM25
+# (via rank_bm25) fills that gap: it ranks chunks purely by keyword overlap with
+# the query, no embeddings and no LLM. We run it over the very chunks LightRAG
+# already indexed (its persisted text-chunk store), so every hit carries the same
+# section + page citation label for free. This is the "keyword" half of hybrid
+# search; fusing it with the graph/semantic answer is a later step.
+
+# LightRAG persists every indexed chunk here at ingest time (id -> content + our
+# section-label file_path). This is the BM25 corpus.
+CHUNK_STORE = WORKING_DIR / "kv_store_text_chunks.json"
+
+
+@dataclass
+class KeywordHit:
+    """One BM25 keyword-search result: a section and its best-matching snippet."""
+
+    label: str    # the section + page citation label (e.g. "x.pdf › page 3 › Manager")
+    score: float  # BM25 relevance score (higher = more keyword overlap)
+    snippet: str  # a short excerpt of the best-matching chunk in that section
+
+
+def _tokenize(text: str) -> list[str]:
+    """Lowercased word tokens for BM25 (runs of letters/digits/underscore)."""
+    return re.findall(r"\w+", text.lower())
+
+
+def _load_chunks() -> list[dict[str, str]]:
+    """Load LightRAG's indexed chunks as [{content, label}], or [] if none yet.
+
+    Reads the persisted chunk store written at ingest time. Each entry carries
+    the chunk `content` and its `file_path` — which is our section + page
+    citation label — so BM25 results are citable without any extra bookkeeping.
+    """
+    if not CHUNK_STORE.exists():
+        return []
+    data = json.loads(CHUNK_STORE.read_text(encoding="utf-8"))
+    chunks: list[dict[str, str]] = []
+    for entry in data.values():
+        content = (entry.get("content") or "").strip()
+        if content:
+            chunks.append(
+                {"content": content, "label": entry.get("file_path", "unknown_source")}
+            )
+    return chunks
+
+
+def keyword_search(question: str, top_k: int = 5) -> list[KeywordHit]:
+    """Rank indexed sections by BM25 keyword overlap with the question.
+
+    Pure lexical search — strong on exact terms (names, IDs, acronyms) that
+    semantic search can miss. Chunk scores are aggregated up to their section
+    (a section's score is its best chunk's), so results align with the citation
+    labels. Returns up to top_k sections, highest score first; sections with no
+    keyword overlap (BM25 score 0) are dropped.
+    """
+    chunks = _load_chunks()
+    if not chunks:
+        return []
+
+    bm25 = BM25Okapi([_tokenize(c["content"]) for c in chunks])
+    scores = bm25.get_scores(_tokenize(question))
+
+    # Keep, per section label, the highest-scoring chunk (score + its text).
+    best: dict[str, tuple[float, str]] = {}
+    for chunk, score in zip(chunks, scores):
+        label = chunk["label"]
+        if label not in best or score > best[label][0]:
+            best[label] = (float(score), chunk["content"])
+
+    hits = [
+        KeywordHit(label=label, score=score, snippet=" ".join(content.split())[:200])
+        for label, (score, content) in best.items()
+        if score > 0
+    ]
+    hits.sort(key=lambda hit: hit.score, reverse=True)
+    return hits[:top_k]
+
+
 # --- CLI -----------------------------------------------------------------------
 
 def main() -> None:
@@ -464,6 +560,14 @@ def main() -> None:
         help="Retrieval strategy (default: hybrid).",
     )
 
+    p_keyword = sub.add_parser(
+        "keyword", help="BM25 keyword search over indexed sections (no LLM)."
+    )
+    p_keyword.add_argument("question", help="Your search query.")
+    p_keyword.add_argument(
+        "--top-k", type=int, default=5, help="How many sections to return (default: 5)."
+    )
+
     args = parser.parse_args()
 
     if args.command == "ingest":
@@ -475,6 +579,13 @@ def main() -> None:
     elif args.command == "query":
         answer = asyncio.run(query(args.question, mode=args.mode))
         print(answer)
+    elif args.command == "keyword":
+        hits = keyword_search(args.question, top_k=args.top_k)
+        if not hits:
+            print("No keyword matches (is anything ingested?).")
+        for i, hit in enumerate(hits, 1):
+            print(f"{i}. [{hit.score:.2f}] {hit.label}")
+            print(f"     {hit.snippet}")
 
 
 if __name__ == "__main__":

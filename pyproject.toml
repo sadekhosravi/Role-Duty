@@ -9,4 +9,5 @@ dependencies = [
     "docling>=2.114.0",
     "lightrag-hku>=1.5.4",
     "openai>=2.46.0",
+    "rank-bm25>=0.2.2",
 ]
