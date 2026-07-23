@@ -54,9 +54,11 @@ from lightrag.utils import EmbeddingFunc, setup_logger
 try:
     from .extraction import parse_pdf
     from .keyword_search import keyword_search
+    from .prompts import ANSWER_SYSTEM_PROMPT
 except ImportError:
     from extraction import parse_pdf
     from keyword_search import keyword_search
+    from prompts import ANSWER_SYSTEM_PROMPT
 
 load_dotenv()
 setup_logger("lightrag", level="INFO")
@@ -99,11 +101,42 @@ RERANK_BASE_URL = os.environ.get(
 )
 MIN_RERANK_SCORE = float(os.environ.get("MIN_RERANK_SCORE", "0.0"))
 
+# Answer cache. LightRAG caches answers keyed on the question plus retrieval
+# settings — but NOT on the system prompt (operate.py builds the key from
+# query_param fields only). So while you are tuning ANSWER_SYSTEM_PROMPT, a
+# repeated question replays the OLD answer and the edit looks like it did
+# nothing. Set LLM_CACHE=false to iterate on the prompt, back to true to stop
+# paying for repeat questions. (Ingest-time extraction caching is a separate
+# LightRAG flag and stays on either way, so this does not affect re-ingest cost.)
+LLM_CACHE_ENABLED = os.environ.get("LLM_CACHE", "true").lower() == "true"
+
 # Citations. When on, answers end with a `### References` section naming the
 # source PDF(s) each fact came from (see query() for how this works). With
 # section referencing (see ingest), each reference is a PDF section, e.g.
 # "AMG.pdf › 2. Roles › 2.1 Manager".
+#
+# NOTE: this flag selects our answer prompt (see query), NOT LightRAG's
+# QueryParam.include_references — that field is declared (base.py) but read
+# nowhere in LightRAG 1.5.4, so passing it has no effect either way. Turning
+# this off falls back to LightRAG's default prompt, which still cites (just
+# unreliably); there is no supported way to suppress citations entirely.
 CITE_SOURCES = os.environ.get("CITE_SOURCES", "true").lower() == "true"
+
+# --- Why we replace LightRAG's answer prompt -----------------------------------
+#
+# The answer — including its `### References` section — is written by the LLM,
+# not assembled by code: LightRAG formats a prompt, sends it, and returns what
+# comes back, unvalidated. So every property we want in an answer (grounded
+# titles, exclusions respected, citations present) has to be won in the prompt.
+#
+# LightRAG's built-in template is generic, and a weak model drops its reference
+# rules on long answers and misses the organizational distinctions this corpus
+# turns on. ANSWER_SYSTEM_PROMPT (prompts.py) replaces it with instructions
+# written against the specific failures we've observed — see that module's
+# docstring for which rule exists because of which mistake.
+#
+# The swap is per call (`aquery(..., system_prompt=...)`), so the installed
+# package is untouched and an agentic node can import the same constant.
 
 # --- Optional: lift the "max 5 citations" cap in the answer prompt -------------
 #
@@ -142,6 +175,20 @@ This document is about organizational roles and their duties. From the input tex
   who reports to or supervises whom, who is responsible for or performs which
   duty, who collaborates with, delegates to, or depends on whom, and which
   department each role belongs to.
+
+Naming rules — these matter more than they look. An entity name invented here
+becomes a permanent graph node that every later answer will faithfully repeat,
+and no answer-time prompt can reliably undo it:
+
+- Name each role EXACTLY as the text writes it, character for character.
+  Copy the title; do not shorten, expand, rephrase, or tidy it. If the text says
+  "Evidence & Property Custodian", the entity is "Evidence & Property Custodian"
+  — never "Evidence Technician" and never a bare "Custodian".
+- Never invent a title. If a duty is described without a named role, attach it
+  to the role the section is about; do not coin a name for it.
+- One role, one entity. If the same role is written in full in one place and
+  referred to loosely elsewhere ("the Custodian", "the technician"), extract it
+  under the full title in every case, so the graph holds a single node.
 
 Focus on roles, their duties, and how they connect. Ignore incidental details
 that are not about roles or their responsibilities."""
@@ -211,6 +258,8 @@ async def build_rag() -> LightRAG:
         # When RERANK is off we pass None, so LightRAG skips the step entirely.
         rerank_model_func=_rerank_model_func if RERANK_ENABLED else None,
         min_rerank_score=MIN_RERANK_SCORE,
+        # Off while tuning the answer prompt — see LLM_CACHE_ENABLED above.
+        enable_llm_cache=LLM_CACHE_ENABLED,
         # Tell the extractor what entities/relationships to pull out (see above).
         addon_params={"entity_types_guidance": EXTRACTION_GUIDANCE},
     )
@@ -313,7 +362,12 @@ async def ingest(path: str | Path) -> int:
 
 # --- Query: question -> answer from the graph ----------------------------------
 
-async def query(question: str, mode: str = "hybrid") -> str:
+async def query(
+    question: str,
+    mode: str = "hybrid",
+    system_prompt: str | None = None,
+    user_prompt: str | None = None,
+) -> str:
     """Answer a natural-language question using the graph.
 
     mode is one of LightRAG's retrieval strategies:
@@ -323,19 +377,33 @@ async def query(question: str, mode: str = "hybrid") -> str:
       hybrid - local + global combined (default)
       mix    - hybrid graph retrieval plus naive vector search
 
+    system_prompt replaces the whole answer template; it defaults to
+    ANSWER_SYSTEM_PROMPT (prompts.py), which tells the model how to reason over
+    the retrieved graph and requires a `### References` section. A replacement
+    must keep the {context_data}, {response_type} and {user_prompt} placeholders
+    — LightRAG .format()s it and will raise KeyError otherwise.
+
+    user_prompt is appended into that template's "Additional instructions" slot,
+    which is the last thing the model reads before the context. Use it for
+    per-call steering (an agentic node narrowing the question, say) rather than
+    for standing rules, which belong in the system prompt.
+
     Citations: LightRAG tags every retrieved chunk with the source PDF (the
-    file_paths we set at ingest) and its default answer prompt ends the reply
-    with a `### References` section listing those sources. `include_references`
-    turns that reference flow on so the answer says which document each fact
-    came from. To answer with no citations, set CITE_SOURCES=false.
+    file_paths we set at ingest) and lists them in the context as a Reference
+    Document List. The answer's `### References` section is written by the model
+    from that list, so its presence depends on the prompt, not on a code path —
+    see the note above CITE_SOURCES.
     """
     rag = await build_rag()
+    if system_prompt is None and CITE_SOURCES:
+        system_prompt = ANSWER_SYSTEM_PROMPT
     try:
         return await rag.aquery(
             question,
+            system_prompt=system_prompt,
             param=QueryParam(
                 mode=mode,
-                include_references=CITE_SOURCES,
+                user_prompt=user_prompt,
                 # Retrieve-only mode for agentic RAG. Set only_need_context=True to
                 # get LightRAG's retrieved context (the multi-hop subgraph + chunks
                 # + citation labels) WITHOUT generating an answer — then let an
