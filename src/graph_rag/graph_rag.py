@@ -1,13 +1,18 @@
 """GraphRAG over PDFs: Docling (StandardPdfPipeline) -> LightRAG graph -> answer.
 
-Everything lives in this one file on purpose — parsing, ingestion, and querying —
-so it reads top to bottom as a single, learnable example.
+This module is the graph-RAG core — configuration, LightRAG wiring, ingest,
+query, remove — plus the CLI that ties everything together. The pipeline is split
+across three small modules so each reads on its own:
 
-The pipeline has three steps, one function each:
-  1. parse_pdf() : PDF -> Docling StandardPdfPipeline -> Sections (per heading)
-  2. ingest()    : Sections -> LightRAG (each a citable doc in one shared graph)
-  3. query()     : a natural-language question -> answer grounded in the graph,
-                   with a `### References` section citing the exact PDF sections
+  - extraction.py     PDF -> Docling -> Sections (one per heading/page)
+  - graph_rag.py      Sections -> LightRAG graph; query the graph for an answer
+  - keyword_search.py BM25 keyword search over the indexed chunks (no LLM)
+
+The three query paths:
+  1. ingest()         : Sections -> LightRAG (each a citable doc in one graph)
+  2. query()          : a question -> answer grounded in the graph, with a
+                        `### References` section citing the exact PDF sections
+  3. keyword_search() : BM25 lexical search (in keyword_search.py)
 
 Storage is LightRAG's default file-based stack — NanoVectorDB for vectors,
 NetworkX for the graph, JSON for key/value — under GRAPH_RAG_WORKING_DIR.
@@ -23,26 +28,17 @@ Usage:
     python src/graph_rag/graph_rag.py remove AMG.pdf              # drop one source PDF
     python src/graph_rag/graph_rag.py query "What is the refund policy?"
     python src/graph_rag/graph_rag.py query "..." --mode local
+    python src/graph_rag/graph_rag.py keyword "escalation refund"  # BM25 search
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import os
-import re
-from dataclasses import dataclass
 from pathlib import Path
 
 from dotenv import load_dotenv
-from rank_bm25 import BM25Okapi
-
-from docling.chunking import HybridChunker
-from docling.datamodel.base_models import InputFormat
-from docling.datamodel.pipeline_options import PdfPipelineOptions
-from docling.document_converter import DocumentConverter, PdfFormatOption
-from docling.pipeline.standard_pdf_pipeline import StandardPdfPipeline
 
 from lightrag import LightRAG, QueryParam
 from lightrag.base import DocStatus
@@ -50,6 +46,17 @@ from lightrag.kg.shared_storage import initialize_pipeline_status
 from lightrag.llm.openai import openai_complete_if_cache, openai_embed
 from lightrag.rerank import cohere_rerank
 from lightrag.utils import EmbeddingFunc, setup_logger
+
+# Sibling modules. Relative imports work when this is imported as a package
+# (`from graph_rag.graph_rag import query`); the fallback lets the file still be
+# run directly (`python src/graph_rag/graph_rag.py ...`), where its own directory
+# is on sys.path instead of a package parent.
+try:
+    from .extraction import parse_pdf
+    from .keyword_search import keyword_search
+except ImportError:
+    from extraction import parse_pdf
+    from keyword_search import keyword_search
 
 load_dotenv()
 setup_logger("lightrag", level="INFO")
@@ -73,6 +80,7 @@ EMBEDDING_DIM = int(os.environ.get("EMBEDDING_DIM", "1536"))
 EMBEDDING_MAX_TOKENS = int(os.environ.get("EMBEDDING_MAX_TOKEN_SIZE", "8192"))
 
 # Where LightRAG persists its graph + NanoVectorDB files (created automatically).
+# keyword_search.py mirrors this default so both point at the same store.
 WORKING_DIR = Path(os.environ.get("GRAPH_RAG_WORKING_DIR", "data/graph_rag"))
 
 # Rerank calls. AFTER graph + vector search gathers candidate chunks, a reranker
@@ -137,101 +145,6 @@ This document is about organizational roles and their duties. From the input tex
 
 Focus on roles, their duties, and how they connect. Ignore incidental details
 that are not about roles or their responsibilities."""
-
-
-# --- 1. Parse: PDF -> Docling StandardPdfPipeline -> per-section text -----------
-
-@dataclass
-class Section:
-    """One citable unit of a PDF: text under a single heading path, on one page.
-
-    `headings` is the Docling heading hierarchy for this section, outermost
-    first, e.g. ("2. Roles", "2.1 Manager"). `page` is the (1-based) PDF page the
-    text sits on. `text` is every chunk under that heading+page, joined. At
-    ingest time (heading + page) becomes the citation label, so answers can cite
-    "sample.pdf › page 25 › Shift Supervisor" rather than just the whole PDF.
-    Grouping by page means a heading that spans pages yields one section per page.
-    """
-
-    headings: tuple[str, ...]
-    page: int | None
-    text: str
-
-
-def _normalize_heading(heading: str) -> str:
-    """Collapse whitespace so the same heading always yields the same label.
-
-    Citations are deduplicated on the exact label string, so stray spacing or
-    line breaks in a heading would otherwise split one section into two
-    references. Normalizing here keeps a section's citation stable.
-    """
-    return " ".join(heading.split())
-
-
-def _chunk_start_page(chunk) -> int | None:
-    """The first PDF page a chunk's content appears on, or None if unknown.
-
-    Docling records provenance for each chunk in `meta.doc_items[].prov[]`, and
-    each provenance entry carries a 1-based `page_no`. A chunk can straddle a
-    page break, so we take the smallest page number as its starting page.
-    """
-    pages = [
-        prov.page_no
-        for item in (chunk.meta.doc_items or [])
-        for prov in (item.prov or [])
-    ]
-    return min(pages) if pages else None
-
-
-def parse_pdf(pdf_path: str | Path) -> list[Section]:
-    """Extract a PDF into a list of Sections, one per heading path.
-
-    Uses Docling's StandardPdfPipeline (deterministic text extraction plus
-    layout + table-detection models — no OCR, no vision model, no GPU), then
-    HybridChunker to split the document along its natural structure. Chunks are
-    'contextualized' (each carries its section headings) and then grouped by
-    that heading path: every chunk sharing the same headings becomes one
-    Section. HybridChunker yields chunks in document order, so sections keep
-    their original order too. Chunks with no heading fall under a single
-    empty-path section for that PDF.
-    """
-    pdf_path = Path(pdf_path)
-    if not pdf_path.exists():
-        raise FileNotFoundError(f"PDF not found: {pdf_path}")
-
-    pipeline_options = PdfPipelineOptions()
-    pipeline_options.do_ocr = False             # deterministic text, no OCR/VLM
-    pipeline_options.do_table_structure = True  # detect tables + layout
-
-    converter = DocumentConverter(
-        format_options={
-            InputFormat.PDF: PdfFormatOption(
-                pipeline_cls=StandardPdfPipeline,
-                pipeline_options=pipeline_options,
-            )
-        }
-    )
-
-    document = converter.convert(pdf_path).document
-
-    chunker = HybridChunker()
-    # Group by (heading path, page) — one citable section per heading per page.
-    # dict preserves first-seen order, so sections stay in document order.
-    grouped: dict[tuple[tuple[str, ...], int | None], list[str]] = {}
-    for chunk in chunker.chunk(document):
-        text = chunker.contextualize(chunk=chunk).strip()
-        if not text:
-            continue
-        headings = tuple(
-            h for h in (_normalize_heading(x) for x in (chunk.meta.headings or [])) if h
-        )
-        page = _chunk_start_page(chunk)
-        grouped.setdefault((headings, page), []).append(text)
-
-    return [
-        Section(headings=headings, page=page, text="\n\n".join(parts))
-        for (headings, page), parts in grouped.items()
-    ]
 
 
 # --- LightRAG wiring: route LLM + embeddings through OpenRouter -----------------
@@ -307,7 +220,7 @@ async def build_rag() -> LightRAG:
     return rag
 
 
-# --- 2. Ingest: sections -> LightRAG graph -------------------------------------
+# --- Ingest: sections -> LightRAG graph ----------------------------------------
 
 # Separator between the PDF name and its heading path in a citation label, e.g.
 # "AMG.pdf › 2. Roles › 2.1 Manager". Purely cosmetic — pick any glyph you like.
@@ -398,7 +311,7 @@ async def ingest(path: str | Path) -> int:
     return total
 
 
-# --- 3. Query: question -> answer from the graph -------------------------------
+# --- Query: question -> answer from the graph ----------------------------------
 
 async def query(question: str, mode: str = "hybrid") -> str:
     """Answer a natural-language question using the graph.
@@ -456,87 +369,6 @@ async def remove(pdf_name: str) -> str:
     if count == 0:
         return f"no sections found for {doc_name}"
     return f"removed {count} section(s) from {doc_name}"
-
-
-# --- Keyword search: BM25 over the indexed chunks ------------------------------
-#
-# LightRAG gives us semantic (embedding) + graph retrieval, but not exact-term
-# matching — the names, codes, and acronyms that vector search can miss. BM25
-# (via rank_bm25) fills that gap: it ranks chunks purely by keyword overlap with
-# the query, no embeddings and no LLM. We run it over the very chunks LightRAG
-# already indexed (its persisted text-chunk store), so every hit carries the same
-# section + page citation label for free. This is the "keyword" half of hybrid
-# search; fusing it with the graph/semantic answer is a later step.
-
-# LightRAG persists every indexed chunk here at ingest time (id -> content + our
-# section-label file_path). This is the BM25 corpus.
-CHUNK_STORE = WORKING_DIR / "kv_store_text_chunks.json"
-
-
-@dataclass
-class KeywordHit:
-    """One BM25 keyword-search result: a section and its best-matching snippet."""
-
-    label: str    # the section + page citation label (e.g. "x.pdf › page 3 › Manager")
-    score: float  # BM25 relevance score (higher = more keyword overlap)
-    snippet: str  # a short excerpt of the best-matching chunk in that section
-
-
-def _tokenize(text: str) -> list[str]:
-    """Lowercased word tokens for BM25 (runs of letters/digits/underscore)."""
-    return re.findall(r"\w+", text.lower())
-
-
-def _load_chunks() -> list[dict[str, str]]:
-    """Load LightRAG's indexed chunks as [{content, label}], or [] if none yet.
-
-    Reads the persisted chunk store written at ingest time. Each entry carries
-    the chunk `content` and its `file_path` — which is our section + page
-    citation label — so BM25 results are citable without any extra bookkeeping.
-    """
-    if not CHUNK_STORE.exists():
-        return []
-    data = json.loads(CHUNK_STORE.read_text(encoding="utf-8"))
-    chunks: list[dict[str, str]] = []
-    for entry in data.values():
-        content = (entry.get("content") or "").strip()
-        if content:
-            chunks.append(
-                {"content": content, "label": entry.get("file_path", "unknown_source")}
-            )
-    return chunks
-
-
-def keyword_search(question: str, top_k: int = 5) -> list[KeywordHit]:
-    """Rank indexed sections by BM25 keyword overlap with the question.
-
-    Pure lexical search — strong on exact terms (names, IDs, acronyms) that
-    semantic search can miss. Chunk scores are aggregated up to their section
-    (a section's score is its best chunk's), so results align with the citation
-    labels. Returns up to top_k sections, highest score first; sections with no
-    keyword overlap (BM25 score 0) are dropped.
-    """
-    chunks = _load_chunks()
-    if not chunks:
-        return []
-
-    bm25 = BM25Okapi([_tokenize(c["content"]) for c in chunks])
-    scores = bm25.get_scores(_tokenize(question))
-
-    # Keep, per section label, the highest-scoring chunk (score + its text).
-    best: dict[str, tuple[float, str]] = {}
-    for chunk, score in zip(chunks, scores):
-        label = chunk["label"]
-        if label not in best or score > best[label][0]:
-            best[label] = (float(score), chunk["content"])
-
-    hits = [
-        KeywordHit(label=label, score=score, snippet=" ".join(content.split())[:200])
-        for label, (score, content) in best.items()
-        if score > 0
-    ]
-    hits.sort(key=lambda hit: hit.score, reverse=True)
-    return hits[:top_k]
 
 
 # --- CLI -----------------------------------------------------------------------
