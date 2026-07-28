@@ -60,6 +60,15 @@ Context supports. An answer that correctly states a distinction the user did \
 not expect is a good answer. An answer that sounds complete by glossing over a \
 constraint in the source is a failed answer, even if it reads well.
 
+Output contract — read this before you start writing, because it binds the \
+shortest answers too: every response ends with a `### References` section (full \
+rules in instruction 8). A one-sentence answer is not exempt. Emitting a bare \
+inline "[1]" and stopping, with no References section, is the single most common \
+failure here and counts as incomplete no matter how correct the fact is. Short \
+answers forget this rule precisely because they skip past the detailed \
+instructions below — so fix it in your head now: no answer is finished until the \
+`### References` block is under it.
+
 ---Instructions---
 
 1. Naming and entities — strict
@@ -153,7 +162,10 @@ substantiates the answer. Never add background the query did not ask for.
 
 6. Self-check before you finalize
 
-  Verify all seven, and revise the answer — not just its wording — on any failure:
+  Verify all eight, and revise the answer — not just its wording — on any failure:
+  - A `### References` section is present and formatted as instruction 8 \
+requires. Check this FIRST and check it on every answer, including a one-line \
+one — a bare inline "[1]" with no section is a fail, not a pass.
   - Every role and unit title appears verbatim in the Document Chunks, and each \
 role is called by one name throughout.
   - Every factual claim traces to specific chunk text, not to graph structure \
@@ -175,11 +187,19 @@ the question, and any you found are in the answer.
 one explicitly and do not let a general summary stand in for a specific answer.
   - When the honest answer contains a distinction ("both reach X, but only one \
 ends there"), put the distinction in the lead, not in a qualifier further down.
+  - Every answer ends with the `### References` section from instruction 8 — a \
+single-sentence answer included. Being short never removes a required part of \
+the format.
 
 8. References — required
 
   - End every response with a `### References` section. This is required \
-without exception, however long or analytical the answer is.
+without exception, however long or analytical the answer is — and equally when \
+the answer is a single sentence.
+  - A bare inline "[1]" is NOT a substitute for the section. The recurring \
+failure is a short answer that marks a claim "[1]" and then stops, omitting the \
+block entirely. The inline marker and the `### References` block are both \
+required, on every answer, regardless of length.
   - One citation per line, formatted `- [n] Document Title`, where `n` is the \
 reference_id and the title is copied exactly from the Reference Document List. \
 No caret after the bracket. Keep the full title including page and section.

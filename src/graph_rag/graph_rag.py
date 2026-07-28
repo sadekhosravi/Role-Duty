@@ -175,6 +175,19 @@ This document is about organizational roles and their duties. From the input tex
   who reports to or supervises whom, who is responsible for or performs which
   duty, who collaborates with, delegates to, or depends on whom, and which
   department each role belongs to.
+- As EXCLUSION RELATIONSHIPS (just as important as duties): the boundaries of a
+  role — what it may NOT do, is NOT responsible for, or is explicitly barred
+  from, and the role or body a matter is handed to instead. Whenever the text
+  marks a limit with "Out of Scope", "not responsible for", "may not", "cannot",
+  "excluded", "handled by", "referred to", or similar, extract it as its own
+  relationship between the role and the withheld action (or the body that holds
+  it) — for example "Site Duty Manager -- may not -- authorize UPS bypass", or
+  "Shift Supervisor -- refers to -- Regional Safety Officer". Do not fold a
+  prohibition into a duty, and do not drop it. A role's limits must live in the
+  graph as relationships, not only in the prose: entity-centric retrieval pulls
+  a role together with its connected relationships, so an exclusion left in
+  chunk text alone can surface the role with its duties and without its
+  boundaries — the exact failure this guidance exists to prevent.
 
 Naming rules — these matter more than they look. An entity name invented here
 becomes a permanent graph node that every later answer will faithfully repeat,
@@ -364,7 +377,7 @@ async def ingest(path: str | Path) -> int:
 
 async def query(
     question: str,
-    mode: str = "hybrid",
+    mode: str = "mix",
     system_prompt: str | None = None,
     user_prompt: str | None = None,
 ) -> str:
@@ -374,8 +387,16 @@ async def query(
       naive  - plain vector search over chunks
       local  - entity-centric (neighborhood of matched entities)
       global - relationship-centric (broad themes)
-      hybrid - local + global combined (default)
-      mix    - hybrid graph retrieval plus naive vector search
+      hybrid - local + global combined
+      mix    - hybrid graph retrieval PLUS naive vector search (default)
+
+    The default is `mix` rather than `hybrid` because pure graph retrieval
+    (local/global/hybrid) can return no usable context when a question's entities
+    are not matched in the graph — the model then correctly but unhelpfully
+    declines, a silent retrieval miss that is indistinguishable from a legitimate
+    refusal. `mix` runs naive vector search alongside the graph traversal, so
+    chunk-level matches backstop the graph and there is almost always something
+    to answer from. Pass mode="hybrid" to reproduce the graph-only behaviour.
 
     system_prompt replaces the whole answer template; it defaults to
     ANSWER_SYSTEM_PROMPT (prompts.py), which tells the model how to reason over
@@ -455,9 +476,10 @@ def main() -> None:
     p_query.add_argument("question", help="Your natural-language question.")
     p_query.add_argument(
         "--mode",
-        default="hybrid",
+        default="mix",
         choices=["naive", "local", "global", "hybrid", "mix"],
-        help="Retrieval strategy (default: hybrid).",
+        help="Retrieval strategy (default: mix — graph + vector, backstops "
+        "graph-only misses; use hybrid for graph-only).",
     )
 
     p_keyword = sub.add_parser(
