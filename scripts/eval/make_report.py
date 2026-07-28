@@ -116,6 +116,102 @@ def load_runs() -> list[tuple[str, dict]]:
     return runs
 
 
+# --- Narrative -----------------------------------------------------------------
+#
+# The scores in this report are read from the results file, but the prose that
+# frames them — what the corpus is, which traps it plants, which capabilities the
+# question ids demonstrate — describes ONE corpus. Pointed at a different corpus
+# it silently keeps describing the old one, naming documents and question ids that
+# are not in the run. So the narrative is data too: a questions file may carry a
+# "report" block overriding any of these keys, and DEFAULT_REPORT below is the
+# data/val text used when it does not.
+DEFAULT_REPORT = {
+    "title": "GraphRAG Validation Report",
+    "corpus_line": "Corpus: five fictional Role &amp; Duty documents",
+    "corpus_intro": [
+        "Five fictional organisations, each documented in the same Role &amp; Duty format as the "
+        "production corpus: five roles per site, and for each role a reporting line, a summary, "
+        "key responsibilities, an explicit <b>Out of Scope</b> list, and an escalation path. "
+        "The documents are generated from data in <font name='Courier' size='8.5'>scripts/eval/make_val_pdfs.py</font>, "
+        "so they are reproducible and editable; the PDFs are build output, not source.",
+        "The five sites share one world. Cedar Ridge Regional Fire &amp; Rescue covers the airport, "
+        "the school, the library and the data centre, so a question can only be answered by reading "
+        "two documents and joining them. That is what separates a corpus that tests retrieval from "
+        "one that tests recall of a single chunk.",
+    ],
+    "documents": [
+        ["Northgate Municipal Airport",
+         "Ramp Agent, Ramp Lead, Airside Safety Officer, Airside Duty Manager, Terminal Duty Manager",
+         "Two same-named Duty Managers with different authority; stop-work authority that sits outside "
+         "the operational chain; the 25-litre spill threshold that routes to the fire service."],
+        ["Cedar Ridge Regional Fire &amp; Rescue",
+         "Firefighter/EMT, Company Officer, Battalion Chief, Fire Marshal, Fire &amp; Life Safety Educator",
+         "Rank does not equal authority: the Battalion Chief commands incidents but only the Fire Marshal "
+         "enforces code. Command transfer is announced, not automatic. The hub document for cross-site questions."],
+        ["Fairview ISD - Westbrook Campus",
+         "Classroom Teacher, Campus Safety Coordinator, School Nurse, Front Office Manager, Principal",
+         "A dual reporting line (administrative vs clinical); an external authority the Principal cannot "
+         "override; drill frequencies as exact numbers."],
+        ["Harbor Point Public Library",
+         "Circulation Assistant, Reference Librarian, Youth Services Librarian, Facilities Supervisor, Branch Manager",
+         "Three-step approval ladders ($10 / $50 / Director, one day / Director); an information-versus-advice "
+         "boundary; the same fire-inspection task owned by a different role than at the school."],
+        ["Blackwater Data Centre",
+         "Data Centre Technician, Shift Lead, Critical Facilities Engineer, Security Officer, Site Duty Manager",
+         "A third Duty Manager; severity-conditional authority (Severity-1 only); a contracted role with a "
+         "split reporting line; a prohibited action with a timed obligation attached."],
+    ],
+    "design_intro":
+        "Twenty-five questions, five per document, spread across four difficulty levels. Each carries a "
+        "reference answer written from the sources and a machine-checkable key. Difficulty is not question "
+        "length - it is how many independent things have to be right at once.",
+    "question_types": [
+        ["Direct lookup (easy)",
+         "One fact, one document, stated in one place. If these fail, retrieval is broken."],
+        ["Scope boundaries (medium)",
+         "The answer is in an <b>Out of Scope</b> list, so the model must notice a prohibition rather "
+         "than summarise the duties it can see. A plausible-sounding wrong answer is always available."],
+        ["Numeric ladders (medium/hard)",
+         "25 litres, $10 / $50, 30 days, one day, 5 minutes, Severity-1 vs Severity-2. Guessing lands near "
+         "the right shape but the wrong number, which the key catches exactly."],
+        ["Authority inversion (hard)",
+         "Someone senior wants to do something only a specific other role may do. Tests whether the system "
+         "reasons from the document's rules or from organisational intuition."],
+        ["Cross-document multi-hop (hard)",
+         "Requires joining two sites through the shared fire department, and citing both."],
+        ["Title collision (very hard)",
+         "Three roles end in 'Duty Manager' and two in 'Lead'. The question is deliberately ambiguous; a "
+         "good answer disambiguates instead of picking one."],
+        ["False premise (very hard)",
+         "The question asserts something the documents contradict. The correct response rejects the premise; "
+         "the failure mode is a fluent explanation of something that is not true."],
+        ["Unanswerable (very hard)",
+         "Asks for figures that appear nowhere. Declining scores full marks; supplying a plausible industry "
+         "number scores zero. This is the only question where saying less is worth more."],
+    ],
+    "claims": [
+        ["Distinguishes similarly-named roles across documents", ["D4", "A5"],
+         "Three roles end in 'Duty Manager' and two in 'Lead'. D4 presents an ambiguous shift report and "
+         "A5 attributes an airside decision to the terminal role; both require disambiguation rather than "
+         "a guess."],
+        ["Respects prohibitions over plausibility", ["F2", "S4", "A4", "D2", "S2"],
+         "Each of these asks whether someone senior may do something only another role may do. The answer "
+         "must come from an Out of Scope list rather than from organisational intuition."],
+        ["Retrieves exact numbers rather than plausible ones", ["A3", "L2", "D3", "S1", "D5"],
+         "The 25-litre spill threshold, the $10/$50 waiver ladder, Severity-1 versus Severity-2, drill "
+         "frequencies, and the 5-minute hazard-sheet obligation."],
+        ["Declines when the corpus is silent", ["F5"],
+         "Asks for staffing and turnout figures that appear nowhere. Full marks require refusing without "
+         "supplying a plausible industry number."],
+        ["Rejects a false premise", ["A5"],
+         "Asserts that the Terminal Duty Manager closes taxiways. The correct answer corrects the premise "
+         "instead of explaining it."],
+        ["Joins two documents through a shared entity", ["F4", "S4", "S5", "L5"],
+         "Each requires reading the fire department document alongside a site document and citing both."],
+    ],
+}
+
+
 # --- Report --------------------------------------------------------------------
 
 def build(results_path: Path) -> Path:
@@ -123,6 +219,7 @@ def build(results_path: Path) -> Path:
     data = json.loads(results_path.read_text(encoding="utf-8"))
     spec = json.loads(QUESTIONS_FILE.read_text(encoding="utf-8"))
     by_id = {q["id"]: q for q in spec["questions"]}
+    rep = {**DEFAULT_REPORT, **spec.get("report", {})}
     results = sorted(data["results"], key=lambda r: r["id"])
     settings = data["settings"]
     P = lambda text, style="body": Paragraph(text, st[style])  # noqa: E731
@@ -130,10 +227,10 @@ def build(results_path: Path) -> Path:
     s: list = []
 
     # --- Cover -----------------------------------------------------------------
-    s.append(P("GraphRAG Validation Report", "title"))
+    s.append(P(rep["title"], "title"))
     s.append(P(
-        f"Corpus: five fictional Role &amp; Duty documents &nbsp;|&nbsp; "
-        f"25 questions &nbsp;|&nbsp; run {data['timestamp']}", "subtitle"))
+        f"{rep['corpus_line']} &nbsp;|&nbsp; "
+        f"{len(spec['questions'])} questions &nbsp;|&nbsp; run {data['timestamp']}", "subtitle"))
 
     s.append(P(f"{data['overall']:.1f} / 100", "score"))
     s.append(Paragraph(
@@ -160,76 +257,20 @@ def build(results_path: Path) -> Path:
 
     # --- 1. The corpus ---------------------------------------------------------
     s.append(P("1. The corpus", "h1"))
-    s.append(P(
-        "Five fictional organisations, each documented in the same Role &amp; Duty format as the "
-        "production corpus: five roles per site, and for each role a reporting line, a summary, "
-        "key responsibilities, an explicit <b>Out of Scope</b> list, and an escalation path. "
-        "The documents are generated from data in <font name='Courier' size='8.5'>scripts/eval/make_val_pdfs.py</font>, "
-        "so they are reproducible and editable; the PDFs are build output, not source.", "body"))
-    s.append(P(
-        "The five sites share one world. Cedar Ridge Regional Fire &amp; Rescue covers the airport, "
-        "the school, the library and the data centre, so a question can only be answered by reading "
-        "two documents and joining them. That is what separates a corpus that tests retrieval from "
-        "one that tests recall of a single chunk.", "body"))
+    for para in rep["corpus_intro"]:
+        s.append(P(para, "body"))
 
     docs_table = [[P("Document", "cellb"), P("Roles", "cellb"), P("What it contributes", "cellb")]]
-    for name, roles, contributes in [
-        ("Northgate Municipal Airport",
-         "Ramp Agent, Ramp Lead, Airside Safety Officer, Airside Duty Manager, Terminal Duty Manager",
-         "Two same-named Duty Managers with different authority; stop-work authority that sits outside "
-         "the operational chain; the 25-litre spill threshold that routes to the fire service."),
-        ("Cedar Ridge Regional Fire &amp; Rescue",
-         "Firefighter/EMT, Company Officer, Battalion Chief, Fire Marshal, Fire &amp; Life Safety Educator",
-         "Rank does not equal authority: the Battalion Chief commands incidents but only the Fire Marshal "
-         "enforces code. Command transfer is announced, not automatic. The hub document for cross-site questions."),
-        ("Fairview ISD - Westbrook Campus",
-         "Classroom Teacher, Campus Safety Coordinator, School Nurse, Front Office Manager, Principal",
-         "A dual reporting line (administrative vs clinical); an external authority the Principal cannot "
-         "override; drill frequencies as exact numbers."),
-        ("Harbor Point Public Library",
-         "Circulation Assistant, Reference Librarian, Youth Services Librarian, Facilities Supervisor, Branch Manager",
-         "Three-step approval ladders ($10 / $50 / Director, one day / Director); an information-versus-advice "
-         "boundary; the same fire-inspection task owned by a different role than at the school."),
-        ("Blackwater Data Centre",
-         "Data Centre Technician, Shift Lead, Critical Facilities Engineer, Security Officer, Site Duty Manager",
-         "A third Duty Manager; severity-conditional authority (Severity-1 only); a contracted role with a "
-         "split reporting line; a prohibited action with a timed obligation attached."),
-    ]:
+    for name, roles, contributes in rep["documents"]:
         docs_table.append([P(f"<b>{name}</b>", "cell"), P(roles, "cell"), P(contributes, "cell")])
     s.append(table(docs_table, [4.2 * cm, 5.3 * cm, 7 * cm], st))
 
     # --- 2. Question design ----------------------------------------------------
     s.append(PageBreak())
     s.append(P("2. How the questions are built", "h1"))
-    s.append(P(
-        "Twenty-five questions, five per document, spread across four difficulty levels. Each carries a "
-        "reference answer written from the sources and a machine-checkable key. Difficulty is not question "
-        "length - it is how many independent things have to be right at once.", "body"))
+    s.append(P(rep["design_intro"], "body"))
 
-    for label, text in [
-        ("Direct lookup (easy)",
-         "One fact, one document, stated in one place. If these fail, retrieval is broken."),
-        ("Scope boundaries (medium)",
-         "The answer is in an <b>Out of Scope</b> list, so the model must notice a prohibition rather "
-         "than summarise the duties it can see. A plausible-sounding wrong answer is always available."),
-        ("Numeric ladders (medium/hard)",
-         "25 litres, $10 / $50, 30 days, one day, 5 minutes, Severity-1 vs Severity-2. Guessing lands near "
-         "the right shape but the wrong number, which the key catches exactly."),
-        ("Authority inversion (hard)",
-         "Someone senior wants to do something only a specific other role may do. Tests whether the system "
-         "reasons from the document's rules or from organisational intuition."),
-        ("Cross-document multi-hop (hard)",
-         "Requires joining two sites through the shared fire department, and citing both."),
-        ("Title collision (very hard)",
-         "Three roles end in 'Duty Manager' and two in 'Lead'. The question is deliberately ambiguous; a "
-         "good answer disambiguates instead of picking one."),
-        ("False premise (very hard)",
-         "The question asserts something the documents contradict. The correct response rejects the premise; "
-         "the failure mode is a fluent explanation of something that is not true."),
-        ("Unanswerable (very hard)",
-         "Asks for figures that appear nowhere. Declining scores full marks; supplying a plausible industry "
-         "number scores zero. This is the only question where saying less is worth more."),
-    ]:
+    for label, text in rep["question_types"]:
         s.append(P(f"<b>{label}.</b> {text}", "bullet"))
 
     # --- 3. Scoring ------------------------------------------------------------
@@ -384,26 +425,7 @@ def build(results_path: Path) -> Path:
         "Nothing here is asserted independently of the data.", "body"))
 
     score_of = {r["id"]: r["score"] for r in results}
-    for claim, ids, evidence in [
-        ("Distinguishes similarly-named roles across documents", ["D4", "A5"],
-         "Three roles end in 'Duty Manager' and two in 'Lead'. D4 presents an ambiguous shift report and "
-         "A5 attributes an airside decision to the terminal role; both require disambiguation rather than "
-         "a guess."),
-        ("Respects prohibitions over plausibility", ["F2", "S4", "A4", "D2", "S2"],
-         "Each of these asks whether someone senior may do something only another role may do. The answer "
-         "must come from an Out of Scope list rather than from organisational intuition."),
-        ("Retrieves exact numbers rather than plausible ones", ["A3", "L2", "D3", "S1", "D5"],
-         "The 25-litre spill threshold, the $10/$50 waiver ladder, Severity-1 versus Severity-2, drill "
-         "frequencies, and the 5-minute hazard-sheet obligation."),
-        ("Declines when the corpus is silent", ["F5"],
-         "Asks for staffing and turnout figures that appear nowhere. Full marks require refusing without "
-         "supplying a plausible industry number."),
-        ("Rejects a false premise", ["A5"],
-         "Asserts that the Terminal Duty Manager closes taxiways. The correct answer corrects the premise "
-         "instead of explaining it."),
-        ("Joins two documents through a shared entity", ["F4", "S4", "S5", "L5"],
-         "Each requires reading the fire department document alongside a site document and citing both."),
-    ]:
+    for claim, ids, evidence in rep["claims"]:
         have = [i for i in ids if i in score_of]
         worst = min((score_of[i] for i in have), default=0.0)
         status = "DEMONSTRATED" if worst >= 80 else "PARTIAL"

@@ -44,6 +44,25 @@ def _normalize_heading(heading: str) -> str:
     return " ".join(heading.split())
 
 
+# Sub-headings that recur under every role in a Role & Duty document. They name a
+# KIND of section, never its owner, so on their own they cannot identify a role.
+STRUCTURAL_HEADINGS = frozenset(
+    {
+        "key responsibilities",
+        "responsibilities",
+        "out of scope",
+        "escalation path",
+        "reports to",
+        "summary",
+    }
+)
+
+
+def _is_structural(heading: str) -> bool:
+    """True if a heading labels a sub-section rather than naming its owner."""
+    return heading.strip().rstrip(":").lower() in STRUCTURAL_HEADINGS
+
+
 def _chunk_start_page(chunk) -> int | None:
     """The first PDF page a chunk's content appears on, or None if unknown.
 
@@ -94,6 +113,19 @@ def parse_pdf(pdf_path: str | Path) -> list[Section]:
     # Group by (heading path, page) — one citable section per heading per page.
     # dict preserves first-seen order, so sections stay in document order.
     grouped: dict[tuple[tuple[str, ...], int | None], list[str]] = {}
+    # The role a bare sub-section belongs to. In these PDFs the role title and its
+    # "Out of Scope" sub-heading sit at the SAME heading level, so Docling reports
+    # a flat path — ("Out of Scope",) — with the role nowhere in it. Two roles'
+    # exclusion lists on one page then share a grouping key and merge into a
+    # single chunk that names neither of them, and the ingest-time extractor has
+    # to guess the owner. It guesses wrong, writing edges that invert the source
+    # ("Approving refunds above $500 is out of scope for the Store Manager" — that
+    # is the Shift Supervisor's ceiling; the Store Manager is who approves above
+    # it). Chunks yield in document order, so remembering the last heading that
+    # actually named something restores the owner for the sub-sections under it.
+    owner: str | None = None
+    seen_under_owner: set[str] = set()
+    dropped_headings = 0
     for chunk in chunker.chunk(document):
         text = chunker.contextualize(chunk=chunk).strip()
         if not text:
@@ -101,8 +133,44 @@ def parse_pdf(pdf_path: str | Path) -> list[Section]:
         headings = tuple(
             h for h in (_normalize_heading(x) for x in (chunk.meta.headings or [])) if h
         )
+        # Deepest heading that names something is the owner of what follows. When
+        # a PDF *does* nest properly, the role is already in the path and this
+        # just tracks it; nothing is prepended.
+        named = [h for h in headings if not _is_structural(h)]
+        if named:
+            owner = named[-1]
+            seen_under_owner = set()
+        elif headings:
+            key = headings[-1].strip().rstrip(":").lower()
+            # A sub-section repeating under one owner means the layout model
+            # missed a heading and a new, unnamed role has started. (Docling does
+            # exactly this on sample_role_duties.pdf: "Store Manager" never
+            # appears in the item stream, so its three sub-sections trail the
+            # Shift Supervisor.) Carrying the owner across that boundary would
+            # relabel one role's rules as another's — the failure this whole
+            # change exists to remove — so drop the attribution instead. The
+            # section stays unowned, which is merely uninformative, not false.
+            if key in seen_under_owner:
+                owner = None
+                seen_under_owner = set()
+                dropped_headings += 1
+            seen_under_owner.add(key)
+            if owner:
+                headings = (owner, *headings)
+                # The label alone is not enough: the extraction and answering
+                # models read `text`, not the citation. Put the owner in the text
+                # too, so a retrieved exclusion list carries the role it binds.
+                if owner.lower() not in text.lower():
+                    text = f"{owner}\n{text}"
         page = _chunk_start_page(chunk)
         grouped.setdefault((headings, page), []).append(text)
+
+    if dropped_headings:
+        print(
+            f"  {pdf_path.name}: {dropped_headings} section(s) left unattributed — "
+            f"the PDF has a heading Docling did not detect, so the role that owns "
+            f"them is unknown. Their text is still ingested and citable."
+        )
 
     return [
         Section(headings=headings, page=page, text="\n\n".join(parts))
