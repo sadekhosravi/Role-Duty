@@ -13,19 +13,24 @@ from pathlib import Path
 # Make the src/ packages importable when running as a plain script.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from langchain_core.messages import HumanMessage
+
 from agent.graph import build_graph
+from agent.state import AgentState
 
 
 async def run(question: str, trace: bool) -> None:
-    result = await build_graph().ainvoke({"messages": [("user", question)]})
+    result = await build_graph().ainvoke(AgentState(messages=[HumanMessage(question)]))
+    # ainvoke hands back a plain dict, not an AgentState — see state.py.
+    state = AgentState(**result)
 
     if trace:
-        for message in result["messages"]:
+        for message in state.messages:
             for call in getattr(message, "tool_calls", None) or []:
                 print(f"  -> {call['name']}({call['args']})", file=sys.stderr)
         print(file=sys.stderr)
 
-    print(result["messages"][-1].content)
+    print(state.messages[-1].content)
 
 
 def main() -> None:
