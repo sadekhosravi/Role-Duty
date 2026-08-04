@@ -1,28 +1,35 @@
-"""The LangGraph workflow: reasoning nodes, each with its own tools.
+"""The LangGraph workflow: an orchestrator delegating to specialist nodes.
 
-    START -> rag -> (rag_tools -> rag)* -> END
+    START -> orchestrator -> researcher   -+
+                          -> gap_auditor  -+-> back to orchestrator
+                          -> notifier     -+
+                          -> responder -> verifier -> END
+                                                   -> back to orchestrator
 
-Today there is one node. `rag` reads the question, decides which of its
-retrievers to call, reads what comes back, and writes the final answer —
-reconciling the graph, vector and keyword views itself rather than trusting any
-one of them. Its system prompt (prompts.py) governs both halves of that: which
-tool to reach for, and how to reason over the results.
+Orchestrator-workers with one evaluator loop. The orchestrator is the only node
+that decides what happens next: it picks one worker, that worker reports back,
+and it picks again until it routes to the responder. The responder's draft then
+goes to the verifier, which either ends the run or sends it back around.
 
-Tool access is per node, not global. A node is defined by a NodeSpec listing the
-tools it may call, and it is handed nothing else: only those tools are bound to
-its model, so it cannot name a tool outside its list, and each node gets its own
-executor, so it cannot reach another node's either. Adding a second node means
-adding a NodeSpec to WORKFLOW.
+This module owns only the wiring. What each node *is* — its prompt, its body,
+its tools — lives in its own file under nodes/, and nothing there knows about
+the edges. Implementing a node means replacing one stub; no edges change.
+
+Tool access is per node, not global. A NodeSpec lists the tools its node may
+call and it is handed nothing else: only those are bound to its model, so it
+cannot name a tool outside its list, and each node gets its own executor, so it
+cannot reach another node's either. MCP tools, when they arrive, are ordinary
+tools — they go in a node's list and change nothing here.
 
 An executor node (`<name>_tools`) is not a reasoning step; it is LangGraph's
 mechanical runner for whatever its node asked for, and it always hands control
-straight back. The loop runs until the node returns a message with no tool
-calls, which is the answer.
+straight back. A worker loops on its own tools until it produces a message with
+no tool calls, and only then reports to the orchestrator.
 
-The shape of the workflow is itself a Pydantic model, so a mistake in how it is
-declared — a node name that cannot be a graph key, two nodes that would collide,
-the same tool listed twice — is raised at import with the offending field named,
-rather than compiling into a graph that quietly misbehaves.
+Both loops are bounded — MAX_DELEGATIONS on the orchestrator's, MAX_REVISIONS on
+the verifier's. Neither bound is decoration: without them a disagreement between
+two nodes runs until LangGraph's recursion limit kills the request outright,
+which returns nothing at all rather than an imperfect answer.
 
 Usage:
     python scripts/agent.py "Who authorizes a UPS bypass?"
@@ -31,190 +38,141 @@ Usage:
 from __future__ import annotations
 
 from langchain_core.messages import HumanMessage
-from langchain_core.tools import BaseTool
-from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from agent.prompts import RAG_SYSTEM_PROMPT
-from agent.state import AgentState
-from agent.tools import graph_rag_search, keyword_search, naive_rag_search
-from graph_rag.graph_rag import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL
+from agent.nodes import NODE_SPECS
+from agent.spec import NodeSpec
+from agent.state import (
+    GAP_AUDITOR,
+    MAX_REVISIONS,
+    NOTIFIER,
+    ORCHESTRATOR,
+    RESEARCHER,
+    RESPONDER,
+    VERIFIER,
+    WORKERS,
+    AgentState,
+)
+
+# Nodes the wiring below refers to by name. Kept next to the wiring so adding an
+# edge and forgetting the node it points at is caught by validation.
+WIRED_NODES = (ORCHESTRATOR, RESEARCHER, GAP_AUDITOR, NOTIFIER, RESPONDER, VERIFIER)
 
 
-class NodeSpec(BaseModel):
-    """One reasoning node: what it is told, and what it is allowed to call.
+def _route_to_worker(state: AgentState) -> str:
+    """Send control to the worker the orchestrator chose.
 
-    `tools` is the node's whole toolbox. It is bound to the node's model and
-    used to build the node's own executor, so the list is the access boundary in
-    both directions — nothing outside it can be named, nothing outside it can be
-    run. A node with an empty list simply answers without retrieving.
+    `next_node` is a Literal, so an invented destination cannot reach here; the
+    only case left is no choice at all, which means the orchestrator is done
+    delegating and the answer should be written.
     """
+    return state.next_node or RESPONDER
 
-    # Frozen because a spec is a declaration, not a working value: the compiled
-    # graph closes over these fields, so mutating one afterwards would leave the
-    # declaration and the running graph disagreeing.
-    model_config = ConfigDict(frozen=True, extra="forbid")
 
-    name: str = Field(
-        min_length=1,
-        description="The node's key in the graph, and the stem of its executor's.",
-    )
-    system_prompt: str = Field(
-        min_length=1,
-        description="Instructions prepended to every call this node makes.",
-    )
-    tools: list[BaseTool] = Field(
-        default_factory=list,
-        description="The only tools this node may call.",
-    )
+def _route_after_verify(state: AgentState) -> str:
+    """End the run, or send the answer back for another pass.
 
-    @field_validator("name")
-    @classmethod
-    def _usable_as_a_graph_key(cls, name: str) -> str:
-        """Reject names that would break or collide once compiled.
-
-        LangGraph node keys are plain strings, so anything is accepted at
-        registration and the damage shows up later. Two are worth catching here:
-        a leading underscore risks colliding with LangGraph's own reserved keys
-        (`__start__`, `__end__`), and a non-identifier name reads badly in every
-        trace and edge definition that mentions it.
-        """
-        if not name.isidentifier():
-            raise ValueError(f"must be a valid Python identifier, got {name!r}")
-        if name.startswith("_"):
-            raise ValueError(f"must not start with '_' (reserved), got {name!r}")
-        return name
-
-    @field_validator("tools")
-    @classmethod
-    def _distinct_tool_names(cls, tools: list[BaseTool]) -> list[BaseTool]:
-        """A duplicate name is unresolvable: the model names the tool it wants.
-
-        Two tools sharing a name — the same tool listed twice, or two different
-        ones both called `search` — leave the executor no way to know which was
-        meant, and the model no way to say.
-        """
-        names = [tool.name for tool in tools]
-        duplicates = sorted({name for name in names if names.count(name) > 1})
-        if duplicates:
-            raise ValueError(f"duplicate tool names: {', '.join(duplicates)}")
-        return tools
-
-    @property
-    def tools_node(self) -> str:
-        """Name of this node's paired tool executor."""
-        return f"{self.name}_tools"
+    Hitting the revision cap returns the current answer with its failed verdict,
+    which is a worse answer but still an answer.
+    """
+    if state.verdict == "fail" and state.revisions < MAX_REVISIONS:
+        return ORCHESTRATOR
+    return END
 
 
 class Workflow(BaseModel):
-    """The set of nodes to compile, and the rules they have to satisfy together.
+    """The set of nodes to compile, and the rules they satisfy together.
 
     NodeSpec validates a node on its own; the checks that need every node at
-    once — that no two claim the same graph key — live here.
+    once — that none collide, and that the ones the wiring names all exist —
+    live here.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     nodes: list[NodeSpec] = Field(
         min_length=1,
-        description="The workflow's nodes. The first is the entry point.",
+        description="The workflow's nodes.",
     )
 
     @model_validator(mode="after")
-    def _distinct_graph_keys(self) -> Workflow:
-        """Catch name collisions, which LangGraph would resolve by overwriting.
+    def _wiring_is_satisfiable(self) -> Workflow:
+        """Catch collisions and missing nodes before they become quiet bugs.
 
         `add_node` with an existing key replaces the node rather than
-        complaining, so a duplicate name silently drops one of them. Executor
-        names are checked too: a node called `rag_tools` would collide with the
-        executor generated for a node called `rag`.
+        complaining, so a duplicate name silently drops one of them; executor
+        names are checked too, since a node called `rag_tools` would collide
+        with the executor generated for a node called `rag`. And because the
+        edges are written against fixed names, a missing node would otherwise
+        fail with a message about an edge rather than about the absent node.
         """
         keys = [key for spec in self.nodes for key in (spec.name, spec.tools_node)]
         duplicates = sorted({key for key in keys if keys.count(key) > 1})
         if duplicates:
             raise ValueError(f"nodes would share graph keys: {', '.join(duplicates)}")
+
+        missing = sorted(set(WIRED_NODES) - {spec.name for spec in self.nodes})
+        if missing:
+            raise ValueError(f"the wiring needs these nodes: {', '.join(missing)}")
         return self
 
     @property
-    def entry_point(self) -> NodeSpec:
-        """The node START leads to."""
-        return self.nodes[0]
+    def by_name(self) -> dict[str, NodeSpec]:
+        """The specs, addressable by node name."""
+        return {spec.name: spec for spec in self.nodes}
 
     def compile(self):
-        """Wire the specs into a runnable graph.
-
-        Each node gets its own executor and its own loop back. Note that nodes
-        are not yet connected to *each other* — each loops on its own tools and
-        then ends — so a second node also needs an edge or a router saying when
-        control passes to it. Until it has one, LangGraph prunes it as
-        unreachable and it will not appear in the compiled graph at all.
-        """
+        """Wire the specs into a runnable graph."""
         builder = StateGraph(AgentState)
 
+        # Every node, plus its own executor if it has tools. ToolNode's `name`
+        # defaults to "tools" and is what shows up in traces, so it is set to
+        # match the graph key — otherwise every executor here would report
+        # itself as "tools" and they would be indistinguishable.
         for spec in self.nodes:
-            builder.add_node(spec.name, _make_node(spec))
-            if not spec.tools:
-                builder.add_edge(spec.name, END)
-                continue
-            # This node's own executor, holding only this node's tools.
-            # ToolNode's `name` defaults to "tools" and is what shows up in
-            # traces, so it is set to match the graph key — otherwise every
-            # executor in a multi-node graph reports itself as "tools" and they
-            # are indistinguishable.
-            builder.add_node(spec.tools_node, ToolNode(spec.tools, name=spec.tools_node))
-            # tools_condition routes to the executor when the model asked for a
-            # tool, and to END when it answered instead.
-            builder.add_conditional_edges(
-                spec.name, tools_condition, {"tools": spec.tools_node, END: END}
-            )
-            builder.add_edge(spec.tools_node, spec.name)
+            builder.add_node(spec.name, spec.runner)
+            if spec.tools:
+                node = ToolNode(spec.tools, name=spec.tools_node)
+                builder.add_node(spec.tools_node, node)
+                builder.add_edge(spec.tools_node, spec.name)
 
-        builder.add_edge(START, self.entry_point.name)
+        builder.add_edge(START, ORCHESTRATOR)
+
+        # The orchestrator delegates to exactly one worker at a time. The
+        # destination list is WORKERS, so a node not in it can never be routed
+        # to no matter what the orchestrator returns.
+        builder.add_conditional_edges(ORCHESTRATOR, _route_to_worker, list(WORKERS))
+
+        # Workers report back and let the orchestrator decide again.
+        for name in (RESEARCHER, GAP_AUDITOR, NOTIFIER):
+            self._continue_from(builder, name, ORCHESTRATOR)
+
+        # The answer is always graded before it can leave.
+        self._continue_from(builder, RESPONDER, VERIFIER)
+        builder.add_conditional_edges(VERIFIER, _route_after_verify, [ORCHESTRATOR, END])
+
         return builder.compile()
 
+    def _continue_from(self, builder: StateGraph, name: str, target: str) -> None:
+        """Send `name` to `target` once it has finished with its own tools.
 
-WORKFLOW = Workflow(
-    nodes=[
-        NodeSpec(
-            name="rag",
-            system_prompt=RAG_SYSTEM_PROMPT,
-            tools=[graph_rag_search, naive_rag_search, keyword_search],
-        ),
-    ]
-)
-
-
-def build_llm() -> ChatOpenAI:
-    """The chat model, pointed at OpenRouter like the rest of the project.
-
-    temperature=0 because every rule in the system prompt is about being exact:
-    the same question over the same documents should not produce a different
-    role title or a different threshold on a second run.
-    """
-    return ChatOpenAI(
-        model=LLM_MODEL,
-        api_key=LLM_API_KEY,
-        base_url=LLM_BASE_URL,
-        temperature=0,
-    )
+        A node with tools cannot simply have an edge out: it has to be able to
+        loop on its executor first. tools_condition returns END when the model
+        stopped asking for tools, and mapping that to `target` is what turns
+        "done calling tools" into "hand over".
+        """
+        spec = self.by_name[name]
+        if not spec.tools:
+            builder.add_edge(name, target)
+            return
+        builder.add_conditional_edges(
+            name, tools_condition, {"tools": spec.tools_node, END: target}
+        )
 
 
-def _make_node(spec: NodeSpec):
-    """Build the async function for one node, closed over its own model."""
-    llm = build_llm()
-    if spec.tools:
-        llm = llm.bind_tools(spec.tools)
-
-    async def node(state: AgentState) -> dict:
-        # The system prompt is prepended per call rather than stored in state,
-        # so it never accumulates as the tool-call loop appends messages — and
-        # so each node reads its own prompt rather than the previous node's.
-        messages = [("system", spec.system_prompt), *state.messages]
-        return {"messages": [await llm.ainvoke(messages)]}
-
-    return node
+WORKFLOW = Workflow(nodes=NODE_SPECS)
 
 
 def build_graph(workflow: Workflow = WORKFLOW):
