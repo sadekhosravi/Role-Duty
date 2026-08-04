@@ -23411,3 +23411,159 @@ RuntimeError: C[1/1]: sample_role_duties.pdf#4-chunk-000: JSONDecodeError: Expec
 2026-07-28 14:24:05,183 - lightrag - INFO - Final context: 91 entities, 124 relations, 20 chunks
 2026-07-28 14:24:05,183 - lightrag - INFO - Final chunks S+F/O: E3/1 E5/2 C1/3 E2/13 E4/28 E5/11 E2/19 E1/70 E3/7 E1/49 E1/35 E2/21 E1/3 E1/23 E3/9 E4/17 E2/53 E3/37 E5/5 E4/10
 2026-07-28 14:24:08,292 - lightrag - INFO - Successfully finalized 12 storages
+2026-08-03 14:00:43,384 - lightrag - INFO - OpenAI LLM Options: {}
+2026-08-03 14:00:44,436 - lightrag - INFO - Embedding config: binding=openai model=openai/text-embedding-3-small embedding_dim=1536 max_token_size=8192
+2026-08-03 14:00:44,436 - lightrag - INFO - Send embedding dimension: False by env var (dimensions=1536, has_param=True, binding=openai)
+2026-08-03 14:00:44,437 - lightrag - INFO - Embedding max_token_size: 8192 (from openai provider default)
+2026-08-03 14:00:44,437 - lightrag - INFO - Reranking is disabled
+2026-08-03 14:00:45,086 - lightrag - INFO - [] Created new empty graph file: C:\Users\Sade\repos\Role-Duty\data\val\graph_rag\graph_chunk_entity_relation.graphml
+2026-08-03 14:00:45,088 - lightrag - INFO - Role LLM Configuration (initialized):
+2026-08-03 14:00:45,089 - lightrag - INFO -  - extract: openai/google/gemini-2.5-flash, host=https://openrouter.ai/api/v1, max_async=4, timeout=240
+2026-08-03 14:00:45,089 - lightrag - INFO -  - keyword: openai/google/gemini-2.5-flash, host=https://openrouter.ai/api/v1, max_async=4, timeout=240
+2026-08-03 14:00:45,089 - lightrag - INFO -  - query: openai/google/gemini-2.5-flash, host=https://openrouter.ai/api/v1, max_async=4, timeout=240
+2026-08-03 14:00:45,089 - lightrag - INFO -  - vlm: openai/google/gemini-2.5-flash, host=https://openrouter.ai/api/v1, max_async=4, timeout=240
+2026-08-03 14:00:45,089 - lightrag - INFO - Role LLM Option:
+2026-08-03 14:00:45,090 - lightrag - INFO -  - extract: OpenAI {}
+2026-08-03 14:00:45,090 - lightrag - INFO -  - keyword: OpenAI {}
+2026-08-03 14:00:45,090 - lightrag - INFO -  - query: OpenAI {}
+2026-08-03 14:00:45,090 - lightrag - INFO -  - vlm: OpenAI {}
+2026-08-03 14:00:45,133 - lightrag - INFO - WebUI assets mounted at /webui
+2026-08-03 14:00:45,243 - uvicorn.error - INFO - Started server process [13180]
+2026-08-03 14:00:45,243 - uvicorn.error - INFO - Waiting for application startup.
+2026-08-03 14:00:45,244 - lightrag - INFO - [] Process 13180 KV load full_docs with 0 records
+2026-08-03 14:00:45,245 - lightrag - INFO - [] Process 13180 KV load text_chunks with 0 records
+2026-08-03 14:00:45,245 - lightrag - INFO - [] Process 13180 KV load full_entities with 0 records
+2026-08-03 14:00:45,245 - lightrag - INFO - [] Process 13180 KV load full_relations with 0 records
+2026-08-03 14:00:45,246 - lightrag - INFO - [] Process 13180 KV load entity_chunks with 0 records
+2026-08-03 14:00:45,246 - lightrag - INFO - [] Process 13180 KV load relation_chunks with 0 records
+2026-08-03 14:00:45,246 - lightrag - INFO - [] Process 13180 KV load llm_response_cache with 0 records
+2026-08-03 14:00:45,246 - lightrag - INFO - [] Process 13180 doc status load doc_status with 0 records
+2026-08-03 14:00:45,247 - uvicorn.error - INFO - Application startup complete.
+2026-08-03 14:00:45,247 - uvicorn.error - INFO - Uvicorn running on http://0.0.0.0:9621 (Press CTRL+C to quit)
+2026-08-03 14:00:51,652 - uvicorn.access - INFO - 127.0.0.1:5085 - "GET / HTTP/1.1" 307
+2026-08-03 14:00:51,727 - uvicorn.access - INFO - 127.0.0.1:5085 - "GET /webui/assets/index-DnPVhc7x.js HTTP/1.1" 304
+2026-08-03 14:00:51,730 - uvicorn.access - INFO - 127.0.0.1:5085 - "GET /webui/assets/index-DocW-KSH.css HTTP/1.1" 304
+2026-08-03 14:00:51,732 - uvicorn.access - INFO - 127.0.0.1:5085 - "GET /webui/assets/chunk-QTnfLwEv.js HTTP/1.1" 304
+2026-08-03 14:00:51,734 - uvicorn.access - INFO - 127.0.0.1:5085 - "GET /webui/assets/src-DWlNNfc5.js HTTP/1.1" 304
+2026-08-03 14:00:51,737 - uvicorn.access - INFO - 127.0.0.1:5085 - "GET /webui/assets/chunk-CSCIHK7Q-DGtgSxmY.js HTTP/1.1" 304
+2026-08-03 14:00:51,739 - uvicorn.access - INFO - 127.0.0.1:5085 - "GET /webui/assets/dist-BExdoQxQ.js HTTP/1.1" 304
+2026-08-03 14:00:51,742 - uvicorn.access - INFO - 127.0.0.1:5085 - "GET /webui/assets/chunk-5ZQYHXKU-CkER5msB.js HTTP/1.1" 304
+2026-08-03 14:00:51,744 - uvicorn.access - INFO - 127.0.0.1:5085 - "GET /webui/assets/chunk-O5CBEL6O-Dby7T2LG.js HTTP/1.1" 304
+2026-08-03 14:00:51,747 - uvicorn.access - INFO - 127.0.0.1:5085 - "GET /webui/assets/path-BWPyau1x.js HTTP/1.1" 304
+2026-08-03 14:00:51,750 - uvicorn.access - INFO - 127.0.0.1:5085 - "GET /webui/assets/array-BifhSqXX.js HTTP/1.1" 304
+2026-08-03 14:00:51,754 - uvicorn.access - INFO - 127.0.0.1:5085 - "GET /webui/assets/line-B0KKq2N_.js HTTP/1.1" 304
+2026-08-03 14:00:51,757 - uvicorn.access - INFO - 127.0.0.1:5085 - "GET /webui/assets/chunk-L5ZTLDWV-wdSumQ3D.js HTTP/1.1" 304
+2026-08-03 14:00:51,760 - uvicorn.access - INFO - 127.0.0.1:5085 - "GET /webui/assets/chunk-NZK2D7GU-BP4v2TD5.js HTTP/1.1" 304
+2026-08-03 14:00:51,762 - uvicorn.access - INFO - 127.0.0.1:5085 - "GET /webui/assets/rough.esm-CSKSodPl.js HTTP/1.1" 304
+2026-08-03 14:00:51,764 - uvicorn.access - INFO - 127.0.0.1:5085 - "GET /webui/assets/chunk-3OPIFGDE-Cqs4cZpM.js HTTP/1.1" 304
+2026-08-03 14:00:51,766 - uvicorn.access - INFO - 127.0.0.1:5085 - "GET /webui/assets/chunk-BSJP7CBP-D8Ua6mpo.js HTTP/1.1" 304
+2026-08-03 14:00:52,194 - uvicorn.access - INFO - 127.0.0.1:8281 - "GET /auth-status HTTP/1.1" 200
+2026-08-03 14:00:52,802 - uvicorn.access - INFO - 127.0.0.1:5085 - "GET /docs?theme=dark HTTP/1.1" 200
+2026-08-03 14:00:52,803 - lightrag - INFO - [] Subgraph query successful | Node count: 0 | Edge count: 0
+2026-08-03 14:00:52,803 - uvicorn.access - INFO - 127.0.0.1:8281 - "GET /graphs?label=*&max_depth=3&max_nodes=1000 HTTP/1.1" 200
+2026-08-03 14:00:52,922 - uvicorn.access - INFO - 127.0.0.1:5085 - "GET /static/swagger-ui/swagger-ui-bundle.js HTTP/1.1" 304
+2026-08-03 14:00:52,922 - uvicorn.access - INFO - 127.0.0.1:8281 - "GET /static/swagger-ui/swagger-ui.css HTTP/1.1" 304
+2026-08-03 14:00:53,069 - uvicorn.access - INFO - 127.0.0.1:8281 - "GET /openapi.json HTTP/1.1" 200
+2026-08-03 14:00:56,865 - uvicorn.access - INFO - 127.0.0.1:8281 - "GET /docs?theme=dark HTTP/1.1" 200
+2026-08-03 14:00:56,901 - uvicorn.access - INFO - 127.0.0.1:8281 - "GET /openapi.json HTTP/1.1" 200
+2026-08-03 14:01:30,528 - uvicorn.access - INFO - 127.0.0.1:10294 - "GET /graph/label/popular?limit=300 HTTP/1.1" 200
+2026-08-03 14:01:30,528 - lightrag - INFO - [] Subgraph query successful | Node count: 0 | Edge count: 0
+2026-08-03 14:01:30,528 - uvicorn.access - INFO - 127.0.0.1:2082 - "GET /graphs?label=*&max_depth=3&max_nodes=1000 HTTP/1.1" 200
+2026-08-03 14:01:31,444 - uvicorn.access - INFO - 127.0.0.1:2082 - "GET /graph/label/popular?limit=300 HTTP/1.1" 200
+2026-08-03 14:01:31,445 - lightrag - INFO - [] Subgraph query successful | Node count: 0 | Edge count: 0
+2026-08-03 14:01:31,446 - uvicorn.access - INFO - 127.0.0.1:10294 - "GET /graphs?label=*&max_depth=3&max_nodes=1000 HTTP/1.1" 200
+2026-08-03 14:01:32,253 - uvicorn.access - INFO - 127.0.0.1:10294 - "GET /graph/label/popular?limit=300 HTTP/1.1" 200
+2026-08-03 14:01:32,253 - lightrag - INFO - [] Subgraph query successful | Node count: 0 | Edge count: 0
+2026-08-03 14:01:32,254 - uvicorn.access - INFO - 127.0.0.1:2082 - "GET /graphs?label=*&max_depth=3&max_nodes=1000 HTTP/1.1" 200
+2026-08-03 14:01:36,685 - uvicorn.error - INFO - Shutting down
+2026-08-03 14:01:36,794 - uvicorn.error - INFO - Waiting for application shutdown.
+2026-08-03 14:01:36,795 - lightrag - INFO - Successfully finalized 12 storages
+2026-08-03 14:01:36,795 - uvicorn.error - INFO - Application shutdown complete.
+2026-08-03 14:01:36,796 - uvicorn.error - INFO - Finished server process [13180]
+2026-08-03 14:02:13,985 - lightrag - INFO - OpenAI LLM Options: {}
+2026-08-03 14:02:15,005 - lightrag - INFO - Embedding config: binding=openai model=openai/text-embedding-3-small embedding_dim=1536 max_token_size=8192
+2026-08-03 14:02:15,005 - lightrag - INFO - Send embedding dimension: False by env var (dimensions=1536, has_param=True, binding=openai)
+2026-08-03 14:02:15,005 - lightrag - INFO - Embedding max_token_size: 8192 (from openai provider default)
+2026-08-03 14:02:15,005 - lightrag - INFO - Reranking is disabled
+2026-08-03 14:02:15,562 - lightrag - INFO - [] Loaded graph from C:\Users\Sade\repos\Role-Duty\data\graph_rag\graph_chunk_entity_relation.graphml with 1013 nodes, 1170 edges
+2026-08-03 14:02:15,752 - lightrag - INFO - Role LLM Configuration (initialized):
+2026-08-03 14:02:15,752 - lightrag - INFO -  - extract: openai/google/gemini-2.5-flash, host=https://openrouter.ai/api/v1, max_async=4, timeout=240
+2026-08-03 14:02:15,752 - lightrag - INFO -  - keyword: openai/google/gemini-2.5-flash, host=https://openrouter.ai/api/v1, max_async=4, timeout=240
+2026-08-03 14:02:15,752 - lightrag - INFO -  - query: openai/google/gemini-2.5-flash, host=https://openrouter.ai/api/v1, max_async=4, timeout=240
+2026-08-03 14:02:15,753 - lightrag - INFO -  - vlm: openai/google/gemini-2.5-flash, host=https://openrouter.ai/api/v1, max_async=4, timeout=240
+2026-08-03 14:02:15,753 - lightrag - INFO - Role LLM Option:
+2026-08-03 14:02:15,753 - lightrag - INFO -  - extract: OpenAI {}
+2026-08-03 14:02:15,753 - lightrag - INFO -  - keyword: OpenAI {}
+2026-08-03 14:02:15,753 - lightrag - INFO -  - query: OpenAI {}
+2026-08-03 14:02:15,753 - lightrag - INFO -  - vlm: OpenAI {}
+2026-08-03 14:02:15,791 - lightrag - INFO - WebUI assets mounted at /webui
+2026-08-03 14:02:15,821 - uvicorn.error - INFO - Started server process [11196]
+2026-08-03 14:02:15,821 - uvicorn.error - INFO - Waiting for application startup.
+2026-08-03 14:02:15,834 - lightrag - INFO - [] Process 11196 KV load full_docs with 167 records
+2026-08-03 14:02:15,846 - lightrag - INFO - [] Process 11196 KV load text_chunks with 167 records
+2026-08-03 14:02:15,857 - lightrag - INFO - [] Process 11196 KV load full_entities with 167 records
+2026-08-03 14:02:15,870 - lightrag - INFO - [] Process 11196 KV load full_relations with 167 records
+2026-08-03 14:02:15,882 - lightrag - INFO - [] Process 11196 KV load entity_chunks with 1013 records
+2026-08-03 14:02:15,896 - lightrag - INFO - [] Process 11196 KV load relation_chunks with 1170 records
+2026-08-03 14:02:15,939 - lightrag - INFO - [] Process 11196 KV load llm_response_cache with 344 records
+2026-08-03 14:02:15,955 - lightrag - INFO - [] Process 11196 doc status load doc_status with 167 records
+2026-08-03 14:02:15,956 - uvicorn.error - INFO - Application startup complete.
+2026-08-03 14:02:15,957 - uvicorn.error - INFO - Uvicorn running on http://0.0.0.0:9621 (Press CTRL+C to quit)
+2026-08-03 14:02:34,757 - uvicorn.access - INFO - 127.0.0.1:3930 - "GET / HTTP/1.1" 307
+2026-08-03 14:02:35,232 - uvicorn.access - INFO - 127.0.0.1:6080 - "GET /auth-status HTTP/1.1" 200
+2026-08-03 14:02:35,439 - uvicorn.access - INFO - 127.0.0.1:6080 - "GET /docs?theme=dark HTTP/1.1" 200
+2026-08-03 14:02:35,615 - uvicorn.access - INFO - 127.0.0.1:6080 - "GET /openapi.json HTTP/1.1" 200
+2026-08-03 14:03:13,805 - uvicorn.access - INFO - 127.0.0.1:11189 - "GET /graph/label/popular?limit=300 HTTP/1.1" 200
+2026-08-03 14:03:13,808 - lightrag - INFO - [] Graph truncated: 1013 nodes found, limited to 1000
+2026-08-03 14:03:13,825 - lightrag - INFO - [] Subgraph query successful | Node count: 1000 | Edge count: 1170
+2026-08-03 14:03:13,937 - uvicorn.access - INFO - 127.0.0.1:11189 - "GET /graphs?label=*&max_depth=3&max_nodes=1000 HTTP/1.1" 200
+2026-08-03 14:03:14,023 - lightrag - INFO - [] Graph truncated: 1013 nodes found, limited to 1000
+2026-08-03 14:03:14,038 - lightrag - INFO - [] Subgraph query successful | Node count: 1000 | Edge count: 1170
+2026-08-03 14:03:14,103 - uvicorn.access - INFO - 127.0.0.1:11189 - "GET /graphs?label=*&max_depth=3&max_nodes=1000 HTTP/1.1" 200
+2026-08-03 14:16:14,063 - uvicorn.access - INFO - 127.0.0.1:13911 - "GET /graph/label/search?q=%D8%A7%D8%AE%D8%B9%D8%B3%D8%AB%D9%86%D8%AB%D8%AB&limit=50 HTTP/1.1" 200
+2026-08-03 14:16:17,218 - uvicorn.access - INFO - 127.0.0.1:13911 - "GET /graph/label/search?q=housekee&limit=50 HTTP/1.1" 200
+2026-08-03 14:16:20,744 - lightrag - INFO - [] Graph truncated: found 97 nodes within max_depth 3
+2026-08-03 14:16:20,745 - lightrag - INFO - [] Subgraph query successful | Node count: 97 | Edge count: 111
+2026-08-03 14:16:20,751 - uvicorn.access - INFO - 127.0.0.1:13911 - "GET /graphs?label=Housekeeping%20Supervisor&max_depth=3&max_nodes=1000 HTTP/1.1" 200
+2026-08-03 14:16:50,648 - uvicorn.access - INFO - 127.0.0.1:2267 - "GET /graph/label/search?q=D&limit=50 HTTP/1.1" 200
+2026-08-03 14:16:53,595 - uvicorn.access - INFO - 127.0.0.1:2267 - "GET /graph/label/search?q=Duty%20Manager&limit=50 HTTP/1.1" 200
+2026-08-03 14:16:53,724 - lightrag - INFO - [] Graph truncated: 1013 nodes found, limited to 1000
+2026-08-03 14:16:53,739 - lightrag - INFO - [] Subgraph query successful | Node count: 1000 | Edge count: 1170
+2026-08-03 14:16:53,805 - uvicorn.access - INFO - 127.0.0.1:2267 - "GET /graphs?label=*&max_depth=3&max_nodes=1000 HTTP/1.1" 200
+2026-08-03 14:23:20,824 - lightrag - WARNING - [] Node Duty Manager not found in the graph
+2026-08-03 14:23:20,825 - uvicorn.access - INFO - 127.0.0.1:8238 - "GET /graphs?label=Duty%20Manager&max_depth=3&max_nodes=1000 HTTP/1.1" 200
+2026-08-03 14:24:10,113 - lightrag - INFO - [] Graph truncated: found 28 nodes within max_depth 3
+2026-08-03 14:24:10,114 - lightrag - INFO - [] Subgraph query successful | Node count: 28 | Edge count: 27
+2026-08-03 14:24:10,116 - uvicorn.access - INFO - 127.0.0.1:8280 - "GET /graphs?label=Primary%20Medical%20Responsibility&max_depth=3&max_nodes=1000 HTTP/1.1" 200
+2026-08-03 14:24:47,242 - uvicorn.access - INFO - 127.0.0.1:5822 - "GET /graph/label/popular?limit=300 HTTP/1.1" 200
+2026-08-04 14:13:08,074 - lightrag - INFO - [] Loaded graph from data\graph_rag\graph_chunk_entity_relation.graphml with 1013 nodes, 1170 edges
+2026-08-04 14:13:08,258 - lightrag - INFO - Role LLM Configuration (initialized):
+2026-08-04 14:13:08,258 - lightrag - INFO -  - extract: None/None, host=None, max_async=4, timeout=240
+2026-08-04 14:13:08,258 - lightrag - INFO -  - keyword: None/None, host=None, max_async=4, timeout=240
+2026-08-04 14:13:08,258 - lightrag - INFO -  - query: None/None, host=None, max_async=4, timeout=240
+2026-08-04 14:13:08,259 - lightrag - INFO -  - vlm: None/None, host=None, max_async=4, timeout=240
+2026-08-04 14:13:08,270 - lightrag - INFO - [] Process 14060 KV load full_docs with 167 records
+2026-08-04 14:13:08,272 - lightrag - INFO - [] Process 14060 KV load text_chunks with 167 records
+2026-08-04 14:13:08,283 - lightrag - INFO - [] Process 14060 KV load full_entities with 167 records
+2026-08-04 14:13:08,294 - lightrag - INFO - [] Process 14060 KV load full_relations with 167 records
+2026-08-04 14:13:08,305 - lightrag - INFO - [] Process 14060 KV load entity_chunks with 1013 records
+2026-08-04 14:13:08,319 - lightrag - INFO - [] Process 14060 KV load relation_chunks with 1170 records
+2026-08-04 14:13:08,359 - lightrag - INFO - [] Process 14060 KV load llm_response_cache with 344 records
+2026-08-04 14:13:08,376 - lightrag - INFO - [] Process 14060 doc status load doc_status with 167 records
+2026-08-04 14:13:08,377 - lightrag - INFO - keyword LLM func: 4 new workers initialized (Timeouts: Func: 240s, Worker: 480s, Health Check: 495s)
+2026-08-04 14:13:21,660 - lightrag - INFO -  == LLM cache == saving: mix:keywords:96f6d5bc8c478989caaad7db1b700b69
+2026-08-04 14:13:21,660 - lightrag - INFO - Embedding func: 8 new workers initialized (Timeouts: Func: 30s, Worker: 60s, Health Check: 75s)
+2026-08-04 14:13:22,271 - lightrag - INFO - Query nodes: UPS, bypass (top_k:40, cosine:0.2)
+2026-08-04 14:13:22,279 - lightrag - INFO - Local query: 40 entites, 52 relations
+2026-08-04 14:13:22,280 - lightrag - INFO - Query edges: authorization, UPS bypass (top_k:40, cosine:0.2)
+2026-08-04 14:13:22,284 - lightrag - INFO - Global query: 57 entites, 40 relations
+2026-08-04 14:13:22,285 - lightrag - INFO - Naive query: 20 chunks (chunk_top_k:20 cosine:0.2)
+2026-08-04 14:13:22,285 - lightrag - INFO - Raw search results: 81 entities, 71 relations, 20 vector chunks
+2026-08-04 14:13:22,293 - lightrag - INFO - After truncation: 81 entities, 71 relations
+2026-08-04 14:13:22,309 - lightrag - INFO - Selecting 75 from 75 entity-related chunks by vector similarity
+2026-08-04 14:13:22,310 - lightrag - INFO - Find no additional relations-related chunks from 71 relations
+2026-08-04 14:13:22,310 - lightrag - INFO - Round-robin merged chunks: 95 -> 78 (deduplicated 17)
+2026-08-04 14:13:22,315 - lightrag - INFO - Rerank func: 4 new workers initialized (Timeouts: Func: 30s, Worker: 60s, Health Check: 75s)
+2026-08-04 14:13:22,703 - lightrag - INFO - Successfully reranked: 20 chunks from 78 original chunks
+2026-08-04 14:13:22,705 - lightrag - INFO - Final context: 81 entities, 71 relations, 20 chunks
+2026-08-04 14:13:22,705 - lightrag - INFO - Final chunks S+F/O: E2/3 E5/8 E2/5 E2/1 E3/13 E3/18 E6/4 E3/24 E2/12 E2/11 E3/27 E1/15 E3/42 E1/46 E3/35 E3/9 E3/36 E2/40 E3/10 E1/17
