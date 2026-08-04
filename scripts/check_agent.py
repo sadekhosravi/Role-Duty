@@ -621,6 +621,85 @@ def check_full_lap() -> None:
     )
 
 
+# ------------------------------------------------------------- observability
+
+
+def check_observability() -> None:
+    """Tracing must be invisible when off, and must not double-count when on.
+
+    Both properties are decidable offline. The first matters because the agent
+    has to run on a machine with no Langfuse; the second because LightRAG
+    installs a global OpenAI patch whenever the keys are present, and the
+    duplicate generations it produces would silently double every cost and token
+    figure — measured, not assumed, see observability.py.
+    """
+    print("\nObservability (Langfuse)")
+    import os
+
+    from agent import observability as obs
+
+    saved = {k: os.environ.get(k) for k in ("LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY")}
+    try:
+        for key in saved:
+            os.environ.pop(key, None)
+        check("no keys means tracing is off", not obs.is_enabled())
+
+        os.environ["LANGFUSE_PUBLIC_KEY"] = "pk-lf-check"
+        check("one key alone is not enough", not obs.is_enabled())
+        os.environ["LANGFUSE_SECRET_KEY"] = "sk-lf-check"
+        check("both keys turn it on", obs.is_enabled())
+        os.environ["LANGFUSE_TRACING_ENABLED"] = "false"
+        check("the kill switch wins over the keys", not obs.is_enabled())
+    finally:
+        os.environ.pop("LANGFUSE_TRACING_ENABLED", None)
+        for key, value in saved.items():
+            os.environ.pop(key, None)
+            if value is not None:
+                os.environ[key] = value
+
+    # The untraced path has to yield a usable object, not None — every caller
+    # reads .callbacks off it unconditionally.
+    with obs.trace_run("question") as trace:
+        check("an untraced run still yields a handle", trace.callbacks == [])
+        check("recording an untraced run is a no-op", trace.record(AgentState()) is None)
+        check("an untraced run has no URL", trace.url is None)
+
+    # The export filter, checked against stand-ins rather than live spans: the
+    # only thing it reads is the span name, and building a real ReadableSpan
+    # here would test OpenTelemetry rather than this decision.
+    class _Span:
+        def __init__(self, name):
+            self.name = name
+            self.attributes = {"langfuse.observation.type": "generation"}
+            self.instrumentation_scope = type("S", (), {"name": "langfuse-sdk"})()
+            self.parent = None
+
+    os.environ.pop("LANGFUSE_TRACE_OPENAI_SDK", None)
+    check(
+        "the patched SDK's duplicate generations are dropped by default",
+        not obs._should_export_span(_Span("OpenAI-generation")),
+        "otherwise every agent LLM call is counted twice",
+    )
+    check(
+        "the handler's own generations are kept",
+        obs._should_export_span(_Span("ChatOpenAI")),
+    )
+    os.environ["LANGFUSE_TRACE_OPENAI_SDK"] = "true"
+    check(
+        "the duplicates can be opted back in",
+        obs._should_export_span(_Span("OpenAI-generation")),
+        "for debugging LightRAG, at the cost of doubled token counts",
+    )
+    os.environ.pop("LANGFUSE_TRACE_OPENAI_SDK", None)
+
+    ok, message = obs.auth_check()
+    check(
+        "auth_check reports rather than raises",
+        isinstance(ok, bool) and bool(message),
+        message,
+    )
+
+
 def check_live(question: str) -> None:
     """One real call to the only implemented node."""
     print("\nLive orchestrator call (needs a working API key)")
@@ -657,6 +736,7 @@ def main() -> None:
     check_corpora()
     check_retrieval()
     check_full_lap()
+    check_observability()
     if args.live:
         check_live(args.question)
 

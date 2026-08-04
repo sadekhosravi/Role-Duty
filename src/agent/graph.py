@@ -43,6 +43,7 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agent.nodes import NODE_SPECS
+from agent.observability import trace_run
 from agent.spec import NodeSpec
 from agent.state import (
     GAP_AUDITOR,
@@ -180,18 +181,46 @@ def build_graph(workflow: Workflow = WORKFLOW):
     return workflow.compile()
 
 
-async def ask(question: str) -> str:
-    """Run one question through the workflow and return the final answer.
+async def run_workflow(
+    question: str,
+    *,
+    session_id: str | None = None,
+    user_id: str | None = None,
+    tags: list[str] | None = None,
+) -> tuple[AgentState, str | None]:
+    """Run one question through the workflow. Returns the state and its trace URL.
 
-    Returns `answer`, not the last message: the verifier appends its critique
-    after the answer, so on a rejected run the final message is the complaint
-    rather than the thing the user asked for.
+    The single entry point, so that tracing is attached in one place rather than
+    at every call site — a caller that forgets the callbacks does not get a
+    degraded trace, it gets no trace, and the gap is invisible until someone
+    goes looking for a run that was never recorded.
 
     Note the explicit HumanMessage: the `("user", "...")` shorthand is a
     convenience of the add_messages reducer, and constructing AgentState
     directly goes straight to Pydantic, which validates against AnyMessage.
+
+    The trace URL is returned rather than printed. This module has no business
+    writing to a terminal, and the CLI is the only caller that wants it.
     """
-    result = await build_graph().ainvoke(AgentState(messages=[HumanMessage(question)]))
-    # ainvoke returns a plain dict, not an AgentState — see state.py. Rebuilding
-    # the model is what makes the result validated and attribute-addressed.
-    return AgentState(**result).answer or "(no answer was produced)"
+    with trace_run(question, session_id=session_id, user_id=user_id, tags=tags) as trace:
+        result = await build_graph().ainvoke(
+            AgentState(messages=[HumanMessage(question)]),
+            config={"callbacks": trace.callbacks},
+        )
+        # ainvoke returns a plain dict, not an AgentState — see state.py.
+        # Rebuilding the model is what makes the result validated and
+        # attribute-addressed, and the verifier's verdict readable as a field.
+        state = AgentState(**result)
+        trace.record(state)
+    return state, trace.url
+
+
+async def ask(question: str) -> str:
+    """Run one question and return just the final answer.
+
+    Returns `answer`, not the last message: the verifier appends its critique
+    after the answer, so on a rejected run the final message is the complaint
+    rather than the thing the user asked for.
+    """
+    state, _ = await run_workflow(question)
+    return state.answer or "(no answer was produced)"
