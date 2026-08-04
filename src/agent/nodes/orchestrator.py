@@ -13,19 +13,25 @@ rather than the default. MAX_DELEGATIONS is the backstop under both.
 
 from __future__ import annotations
 
+import logging
+
+from langchain_core.messages import HumanMessage
 from pydantic import BaseModel, ConfigDict, Field
 
-from ..llm import build_llm
+from ..llm import build_structured_llm
 from ..spec import NodeSpec
 from ..state import (
     MAX_DELEGATIONS,
     MAX_REVISIONS,
     ORCHESTRATOR,
+    RESEARCHER,
     RESPONDER,
     WORKERS,
     AgentState,
     WorkerName,
 )
+
+log = logging.getLogger(__name__)
 
 PROMPT = """\
 You are the orchestrator of a team that answers questions about an
@@ -103,45 +109,81 @@ When you are told you are near your delegation limit, stop gathering and pick
 the responder. An answer with acknowledged gaps beats no answer.
 
 
+WRITING THE BRIEF
+
+Every delegation carries a brief, and the worker sees only that — not your
+reasoning, not the question you were asked. It is an instruction, addressed to
+the worker, naming the specific thing to do this turn.
+
+A brief that restates the topic is useless. "Research the refund question" tells
+a worker that already reported nothing it did not know, and it will report the
+same thing again. Name the missing piece:
+
+  Bad:  Find out about UPS bypass authority.
+  Good: Confirm the exact job title of the role that authorises a UPS bypass
+        using keyword_search, and find the numeric limit stated in its Out of
+        Scope section.
+
+On a REPEAT delegation to a worker that has already run, the brief must name
+what is new — what was not established last time, a different tool to try, a
+different phrasing to search. A worker re-run without a new target will do
+nothing, and the turn is wasted. If you cannot name something new for it to do,
+that worker is finished; pick a different one or pick the responder.
+
+If the verifier rejected the answer, put the gap it named into the brief.
+
+
 EXAMPLES
 
 Request: "Who signs off a 700 dollar refund?"
-    -> researcher. Needs both the threshold and the role that holds it.
+    -> researcher: "Find the refund approval thresholds and the exact title of
+       the role that approves above them."
 
 The researcher has reported the threshold and the approving role.
-    -> responder. The evidence answers the question.
+    -> responder: "Answer the question from the thresholds and titles reported."
+
+The researcher reported the approving role but no exact title from chunk text.
+    -> researcher: "Confirm the exact title of that role with keyword_search.
+       The graph gave a name that has not been checked against document text."
 
 Request: "Is there anything in these documents that nobody owns?"
-    -> gap_auditor. It is a question about coverage across the whole role set,
-       not about any one role.
+    -> gap_auditor: "Sweep for duties with no owning role across all
+       organisations, and report them grouped by document."
 
 Request: "Check whether anyone owns generator testing, and tell the Site
 Operations Manager if not."
-    -> gap_auditor first. The notifier has nothing to send until the finding
-       exists.
+    -> gap_auditor first: "Establish whether any role owns generator testing at
+       the data centre." The notifier has nothing to send until that exists.
 
 The verifier rejected the answer: it named an "Assistant Manager" that appears
 in no cited source.
-    -> researcher, to establish the real title of that role. Not the responder.
+    -> researcher: "The title 'Assistant Manager' is unsupported. Find the real
+       title of the role that approves refunds above the threshold."
 
-The researcher and the keyword search have both come back empty on a duty the
-user asked about.
-    -> responder, to say the documents do not cover it.
+The researcher has twice come back empty on a duty the user asked about.
+    -> responder: "Say the documents do not cover this duty, and name what was
+       searched for." Do not send the researcher a third time.
 """
 
 
 class Route(BaseModel):
-    """The orchestrator's decision for this turn."""
+    """The orchestrator's decision for this turn: a task, and who does it."""
 
     model_config = ConfigDict(extra="forbid")
 
-    # `reason` is declared first on purpose: the model fills the fields in
-    # order, so it has to state a justification before it commits to a
-    # destination. It is not stored — its whole job is to happen before the
-    # choice rather than after it.
-    reason: str = Field(
+    # `brief` is declared first on purpose: the model fills fields in order, so
+    # it has to work out what needs doing before it picks who does it — which is
+    # the right order, and stops the choice being a first impression the rest
+    # justifies. Unlike the justification this replaced, the brief is kept: it
+    # is handed to the worker, which is the only thing that makes a second
+    # delegation to the same worker mean anything.
+    brief: str = Field(
         min_length=1,
-        description="One sentence: why this worker, and why now.",
+        description=(
+            "The task for the worker, addressed to it. Name the specific thing "
+            "to find or do this turn, not the general topic. One or two "
+            "sentences."
+        ),
     )
     next_node: WorkerName = Field(
         description="The worker to run next.",
@@ -160,8 +202,18 @@ def _get_router():
     """
     global _router
     if _router is None:
-        _router = build_llm().with_structured_output(Route)
+        _router = build_structured_llm(Route)
     return _router
+
+
+def _fallback(state: AgentState) -> WorkerName:
+    """Where to go when the routing call itself fails.
+
+    A flaky structured-output call should cost a turn, not the request. The
+    choice is the one that cannot make things worse: gather if nothing has been
+    gathered, otherwise write the answer with what is already there.
+    """
+    return RESEARCHER if not state.delegations else RESPONDER
 
 
 def _progress(state: AgentState) -> str:
@@ -193,25 +245,57 @@ def _progress(state: AgentState) -> str:
     return "\n".join(lines)
 
 
-async def run(state: AgentState) -> dict:
-    """Choose the next worker.
+def _delegation(target: str, brief: str) -> HumanMessage:
+    """The brief, addressed to the worker that is about to run.
 
-    Returns only the routing decision — the orchestrator deliberately adds
-    nothing to the conversation, so workers read the user's request and each
-    other's findings without routing chatter in between.
+    Delegating used to pass nothing but a destination, on the reasoning that
+    routing chatter would only clutter the conversation. That was wrong, and
+    visibly so: a worker re-invoked with no task saw its own finished report and
+    correctly did nothing, seven times in a row. The brief is the difference
+    between "run again" and "run again, and this time find X".
+
+    It goes in as a user turn — providers differ on how they treat assistant
+    messages the assistant did not write, and this has to be read reliably.
     """
+    return HumanMessage(f"[orchestrator → {target}] {brief}")
+
+
+async def run(state: AgentState) -> dict:
+    """Choose the next worker, and tell it what to do."""
     # The cap is enforced here rather than in the router so that hitting it does
     # not cost a model call, and so the decision is recorded like any other.
     if len(state.delegations) >= MAX_DELEGATIONS:
-        return {"next_node": RESPONDER, "delegations": [RESPONDER]}
+        brief = (
+            "The retrieval budget for this question is spent. Write the answer "
+            "from what has been gathered, and be explicit about what is missing."
+        )
+        return {
+            "next_node": RESPONDER,
+            "delegations": [RESPONDER],
+            "messages": [_delegation(RESPONDER, brief)],
+        }
 
     # The progress note goes in as a user turn rather than a second system
     # message: multiple system messages are handled inconsistently across
     # providers, and this has to be read reliably every turn.
-    route: Route = await _get_router().ainvoke(
-        [("system", PROMPT), *state.messages, ("human", _progress(state))]
-    )
-    return {"next_node": route.next_node, "delegations": [route.next_node]}
+    try:
+        route: Route = await _get_router().ainvoke(
+            [("system", PROMPT), *state.messages, ("human", _progress(state))]
+        )
+        target, brief = route.next_node, route.brief
+    except Exception as error:  # noqa: BLE001 - logged, then recovered from
+        target = _fallback(state)
+        brief = (
+            "Continue with the question as asked; the routing step failed, so "
+            "this brief is a default rather than a specific instruction."
+        )
+        log.warning("routing call failed (%s); falling back to %s", error, target)
+
+    return {
+        "next_node": target,
+        "delegations": [target],
+        "messages": [_delegation(target, brief)],
+    }
 
 
 SPEC = NodeSpec(

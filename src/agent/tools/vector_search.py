@@ -42,8 +42,12 @@ async def naive_rag_search(question: str, top_k: int = 5) -> str:
     hits = similarity_search(get_collection(), question, n_results=top_k)
     if not hits:
         return "[no vector matches — is the Chroma store ingested?]"
+    # Labels use the same " › " shape as the graph and keyword tools, so a
+    # citation copied out of any of the three reads the same way. This store
+    # holds only a file and a chunk index — the Chroma ingest keeps no page or
+    # section — so the label stops there rather than inventing the rest.
     return "\n\n".join(
-        f"[{i}] {hit['metadata']['source']} (chunk {hit['metadata']['index']}) "
-        f"- distance {hit['distance']:.4f}\n{hit['text']}"
+        f"[{i}] {hit['metadata']['source']} › chunk {hit['metadata']['index']} "
+        f"(distance {hit['distance']:.4f})\n{hit['text']}"
         for i, hit in enumerate(hits, 1)
     )

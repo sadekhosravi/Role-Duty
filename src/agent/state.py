@@ -65,6 +65,12 @@ MAX_REVISIONS = 2
 # that keeps delegating gets cut off with an answer rather than an exception.
 MAX_DELEGATIONS = 8
 
+# How many tool calls the researcher may make across the whole run. Its loop is
+# the third one that needs a bound, and the least visible: a node that keeps
+# calling tools never reaches a router, so nothing else can stop it before
+# LangGraph's recursion limit does.
+MAX_RETRIEVALS = 8
+
 
 class AgentState(BaseModel):
     """Everything the workflow carries between nodes.
@@ -104,10 +110,22 @@ class AgentState(BaseModel):
     returned `[name]` append rather than replace — the same role `add_messages`
     plays for the conversation."""
 
-    verdict: Literal["pass", "fail"] | None = Field(
+    answer: str | None = Field(
+        default=None,
+        description="The responder's current answer. Rewritten on each revision.",
+    )
+    """Kept as its own field rather than read off the end of `messages`, because
+    the verifier appends its critique after the answer — so the last message is
+    routinely *not* the thing the user asked for. This is what `ask()` returns."""
+
+    verdict: Literal["pass", "fail", "ungraded"] | None = Field(
         default=None,
         description="The verifier's judgement on the current answer.",
     )
+    """"ungraded" is not a judgement — it means the verifier itself failed and
+    the answer went out unchecked. Kept distinct from "pass" so nothing downstream
+    can report an answer as verified when nothing verified it."""
+
     revisions: int = Field(
         default=0,
         ge=0,

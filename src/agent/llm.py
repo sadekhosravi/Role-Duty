@@ -33,6 +33,23 @@ def build_llm() -> ChatOpenAI:
     )
 
 
+def build_structured_llm(schema: type):
+    """A model constrained to return `schema`, over the robust transport.
+
+    `method` is pinned rather than left to default. langchain-openai defaults to
+    "json_schema", which asks the model to emit the JSON as ordinary text and
+    parse it afterwards; through OpenRouter that truncates intermittently, and a
+    half-written object — `{"reason":` and nothing more — fails validation and
+    takes the whole run down with it.
+
+    "function_calling" routes the same schema through the provider's tool-call
+    machinery, where the structure is the provider's problem rather than
+    something the model has to spell correctly under a token budget. Observed
+    stable where the default was not.
+    """
+    return build_llm().with_structured_output(schema, method="function_calling")
+
+
 def chat_runner(system_prompt: str, tools: Sequence[BaseTool] = ()) -> Runner:
     """A plain "think, and call tools until done" node body.
 

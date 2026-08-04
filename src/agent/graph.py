@@ -183,6 +183,10 @@ def build_graph(workflow: Workflow = WORKFLOW):
 async def ask(question: str) -> str:
     """Run one question through the workflow and return the final answer.
 
+    Returns `answer`, not the last message: the verifier appends its critique
+    after the answer, so on a rejected run the final message is the complaint
+    rather than the thing the user asked for.
+
     Note the explicit HumanMessage: the `("user", "...")` shorthand is a
     convenience of the add_messages reducer, and constructing AgentState
     directly goes straight to Pydantic, which validates against AnyMessage.
@@ -190,4 +194,4 @@ async def ask(question: str) -> str:
     result = await build_graph().ainvoke(AgentState(messages=[HumanMessage(question)]))
     # ainvoke returns a plain dict, not an AgentState — see state.py. Rebuilding
     # the model is what makes the result validated and attribute-addressed.
-    return AgentState(**result).messages[-1].content
+    return AgentState(**result).answer or "(no answer was produced)"

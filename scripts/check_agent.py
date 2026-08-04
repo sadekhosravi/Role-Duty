@@ -14,18 +14,23 @@ question and prints what it chose and why.
 
 import argparse
 import asyncio
+import json
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, ToolMessage
 from pydantic import ValidationError
 
 from agent import WORKFLOW, AgentState, NodeSpec, Workflow, build_graph
 from agent.nodes import orchestrator as orch
+from agent.nodes import researcher as res
+from agent.nodes import responder as resp
+from agent.nodes import verifier as ver
 from agent.state import (
     MAX_DELEGATIONS,
+    MAX_RETRIEVALS,
     MAX_REVISIONS,
     ORCHESTRATOR,
     RESPONDER,
@@ -39,6 +44,11 @@ PASSED, FAILED = [], []
 def check(label: str, ok: bool, detail: str = "") -> None:
     (PASSED if ok else FAILED).append(label)
     print(f"  [{'ok' if ok else 'FAIL'}] {label}{f' — {detail}' if detail else ''}")
+
+
+def flat(text: str) -> str:
+    """Collapse whitespace, so a phrase check is not defeated by a line wrap."""
+    return " ".join(text.split())
 
 
 def rejects(thunk) -> tuple[bool, str]:
@@ -150,9 +160,19 @@ def check_orchestrator() -> None:
         orch.Route.model_json_schema()["properties"]["next_node"]["enum"] == list(WORKERS),
     )
     check(
-        "it has to justify before it picks",
-        list(orch.Route.model_fields) == ["reason", "next_node"],
-        "field order is what forces reasoning first",
+        "it works out the task before picking who does it",
+        list(orch.Route.model_fields) == ["brief", "next_node"],
+        "field order is what stops the choice being a first impression",
+    )
+    check(
+        "a delegation carries a brief to the worker",
+        "[orchestrator → researcher] find the exact title"
+        in orch._delegation("researcher", "find the exact title").content,
+        "a worker re-run with no task does nothing, seven times over",
+    )
+    check(
+        "the prompt demands a NEW target on a repeat delegation",
+        "must name what is new" in flat(orch.PROMPT),
     )
 
     capped = AgentState(delegations=["researcher"] * MAX_DELEGATIONS)
@@ -163,12 +183,193 @@ def check_orchestrator() -> None:
         f"MAX_DELEGATIONS={MAX_DELEGATIONS}",
     )
     check(
+        "even the capped delegation tells the responder why",
+        "budget" in result["messages"][0].content,
+    )
+    check(
         "it is told what it has already run",
         "researcher" in orch._progress(AgentState(delegations=["researcher"])),
     )
     check(
         "it is told when the verifier rejected the answer",
         "rejected" in orch._progress(AgentState(verdict="fail", revisions=1)),
+    )
+
+
+def check_verifier() -> None:
+    print("\nVerifier")
+    check(
+        "its verdict is constrained to pass or fail",
+        ver.Verdict.model_json_schema()["properties"]["verdict"]["enum"] == ["pass", "fail"],
+    )
+    check(
+        "it has to enumerate problems before ruling",
+        list(ver.Verdict.model_fields)[0] == "unsupported_claims",
+        "field order is what stops a verdict-first first impression",
+    )
+    check(
+        "an honest 'not in the documents' answer is a documented pass",
+        "documents do not cover the question" in flat(ver.PROMPT),
+        "without this the loop never terminates on an unanswerable question",
+    )
+
+    # Reachable without a model: no answer to grade short-circuits.
+    result = asyncio.run(ver.run(AgentState()))
+    check("a missing answer fails without crashing", result["verdict"] == "fail")
+    check("a missing answer still counts as a revision", result["revisions"] == 1)
+
+    critique = ver._critique(
+        ver.Verdict(
+            unsupported_claims=["the title 'Assistant Manager'"],
+            verdict="fail",
+            gap="confirm the actual title that approves refunds",
+        )
+    )
+    check("a rejection names the claim", "Assistant Manager" in critique)
+    check("a rejection says what would close it", "confirm the actual title" in critique)
+
+    # The mechanical citation check — decidable by string comparison, so it runs
+    # before any model call and cannot be talked round.
+    evidence = ToolMessage(
+        tool_call_id="1",
+        content=(
+            "[13] sample_role_duties.pdf › page 2 › Shift Supervisor › Key Responsibilities\n"
+            "[16] sample_role_duties.pdf › page 1 › Store Associate - Front of House › Out of Scope\n"
+        ),
+    )
+    real = "sample_role_duties.pdf › page 2 › Shift Supervisor › Key Responsibilities"
+    shifted = "sample_role_duties.pdf › page 3 › Shift Supervisor › Key Responsibilities"
+    check(
+        "a copied label passes",
+        not ver._citation_problems(f"x [1]\n\n### References\n- [1] {real}\n", [evidence]),
+    )
+    check(
+        "a label with a shifted page is caught",
+        shifted
+        in str(ver._citation_problems(f"x [1]\n\n### References\n- [1] {shifted}\n", [evidence])),
+        "the exact failure two rounds of prompting did not stop",
+    )
+    stripped = "Shift Supervisor › Key Responsibilities"
+    check(
+        "a label stripped of its file and page is caught",
+        stripped
+        in str(ver._citation_problems(f"x [1]\n\n### References\n- [1] {stripped}\n", [evidence])),
+        "the loophole the responder found when told not to fabricate",
+    )
+    check(
+        "formatting alone does not fail a correct citation",
+        not ver._citation_problems(f"x [1]\n\n### References\n- [1] **{real}**.\n", [evidence]),
+        "bold and a full stop are decoration, not a different label",
+    )
+    check(
+        "a trailing colon does not fail a correct citation",
+        not ver._citation_problems(
+            f"x [1]\n\n### References\n- [1] {real}:\n", [evidence]
+        ),
+        "several real section labels end in one and answers drop it",
+    )
+    # Reference numbering style must not decide whether the guard runs at all.
+    for style in (f"- [1] {shifted}", f"[1] {shifted}", f"1. {shifted}", f"1) {shifted}"):
+        check(
+            f"the guard runs on references written as {style.split(' ')[0]!r}",
+            shifted in str(ver._citation_problems(f"x\n\n### References\n{style}\n", [evidence])),
+            "matching one style only makes the check stop silently, not get stricter",
+        )
+    check(
+        "with no evidence at all, nothing is called fabricated",
+        not ver._citation_problems(f"x\n\n### References\n- [1] {real}\n", []),
+        "otherwise an honest 'found nothing' answer could never pass",
+    )
+    # The class of bug, not just the instance: a References section the parser
+    # cannot read must fail, because "found no citations" and "found them all
+    # correct" are otherwise the same empty result.
+    check(
+        "an unreadable References section fails instead of passing",
+        ver._citation_problems(
+            "x\n\n### References\n| 1 | some label |\n", [evidence]
+        ),
+        "an unrecognised format must not silently switch the check off",
+    )
+    check(
+        "an empty References section fails too",
+        ver._citation_problems("x\n\n### References\n", [evidence]),
+    )
+    check(
+        "an answer with no References section is left to the grader",
+        not ver._citation_problems("x with no references at all", [evidence]),
+        "the prompt already covers a missing section; this check is about unreadable ones",
+    )
+    check(
+        "a rejection hands over the labels that ARE valid",
+        real
+        in asyncio.run(
+            ver.run(
+                AgentState(
+                    answer=f"x [1]\n\n### References\n- [1] {stripped}\n",
+                    messages=[evidence],
+                )
+            )
+        )["messages"][0].content,
+        "so the fix is copying from a list, not guessing again",
+    )
+    fabricated_run = asyncio.run(
+        ver.run(
+            AgentState(
+                answer=f"x [1]\n\n### References\n- [1] {shifted}\n", messages=[evidence]
+            )
+        )
+    )
+    check(
+        "a fabricated citation fails without a model call",
+        fabricated_run["verdict"] == "fail",
+    )
+    check(
+        "and the rejection quotes the offending label",
+        shifted in fabricated_run["messages"][0].content,
+    )
+
+
+def check_responder() -> None:
+    print("\nResponder")
+    check("it has no retrieval tools", not WORKFLOW.by_name[RESPONDER].tools)
+    check(
+        "it is told to repair rather than reword on a revision",
+        "Revision policy" in flat(resp.PROMPT),
+    )
+    check("it is required to cite", "### References" in flat(resp.PROMPT))
+    check(
+        "'the documents do not cover this' is a complete answer",
+        "complete and correct answer" in flat(resp.PROMPT),
+        "the responder and verifier have to agree on this or the loop spins",
+    )
+    check(
+        "it is told it has no retrieval of its own",
+        "no retrieval tools" in flat(resp.PROMPT),
+    )
+    check(
+        "it is told to copy labels, never build them",
+        "Never construct one" in flat(resp.PROMPT),
+        "a plausible label points nowhere and cannot be spotted",
+    )
+    check(
+        "the label example is schematic, not a real filename",
+        "<file>.pdf" in flat(resp.PROMPT)
+        and "sample_role_duties.pdf › page 2 ›" not in flat(resp.PROMPT),
+        "a realistic example gets pattern-filled instead of copied",
+    )
+    check(
+        "it is told a bare heading is not a label",
+        "is not a label" in flat(resp.PROMPT),
+    )
+    check(
+        "it is warned the corpus holds several organisations",
+        "SEVERAL UNRELATED ORGANISATIONS" in flat(resp.PROMPT)
+        and "SEVERAL UNRELATED ORGANISATIONS" in flat(res.PROMPT),
+        "one graph holds 8 orgs, so unscoped retrieval crosses them",
+    )
+    check(
+        "the verifier checks the same thing the responder is asked for",
+        "full source label" in flat(ver.PROMPT) and "full source label" in flat(resp.PROMPT),
     )
 
 
@@ -226,6 +427,111 @@ def check_tool_arguments() -> None:
 # -------------------------------------------------------------- behavioural
 
 
+def check_researcher() -> None:
+    print("\nResearcher")
+    check("it has all three retrievers", len(WORKFLOW.by_name["researcher"].tools) == 3)
+    check(
+        "it is told not to answer",
+        "You do not answer the question" in flat(res.PROMPT),
+        "answering here would leave the verifier grading a summary",
+    )
+    check(
+        "it must confirm graph titles against document text",
+        "confirm that exact string with keyword_search" in flat(res.PROMPT),
+    )
+    check("its report has to name gaps", "Gaps —" in flat(res.PROMPT))
+    check(
+        "it is told the brief overrides its own sense of being finished",
+        "overrides your own sense of whether the work is finished" in flat(res.PROMPT),
+        "this is what stopped it no-opping on re-delegation",
+    )
+    check(
+        "it is told where the graph tool hides its labels",
+        "Reference Document List at the END" in flat(res.PROMPT),
+        "the chunks carry a reference_id, not a label",
+    )
+    check(
+        "it is warned the bracket means something different per tool",
+        "is NOT a citation number" in flat(res.PROMPT),
+    )
+
+    check(
+        "the tool budget is stated every turn",
+        "retrievals left" in res._budget(3),
+    )
+    check(
+        "a spent budget is stated as spent",
+        "budget is spent" in res._budget(0),
+    )
+    check(
+        "past the budget the tools are unbound, not just discouraged",
+        res._get_llm(tools_allowed=False) is not res._get_llm(tools_allowed=True),
+        f"MAX_RETRIEVALS={MAX_RETRIEVALS}",
+    )
+    check(
+        "completed tool calls are what count against the budget",
+        res._retrievals_used(
+            [HumanMessage("q"), ToolMessage("out", tool_call_id="1"), HumanMessage("x")]
+        )
+        == 1,
+    )
+
+
+def check_corpora() -> None:
+    """The two retrieval stores must hold the same documents.
+
+    Nothing in the code enforces this — they are ingested by separate scripts
+    into separate directories — so it is checked rather than assumed. A
+    mismatch is not a subtle degradation: the researcher would cross-check the
+    graph against a passage from a document the graph has never seen, and the
+    responder would cite both in one answer as though they described one
+    organisation.
+    """
+    print("\nCorpus agreement between the two stores")
+    try:
+        from agent.tools._stores import get_collection
+        from graph_rag.graph_rag import WORKING_DIR
+
+        chroma = {
+            meta["source"]
+            for meta in get_collection().get(include=["metadatas"])["metadatas"]
+        }
+        chunks = json.loads(
+            (Path(WORKING_DIR) / "kv_store_text_chunks.json").read_text(encoding="utf-8")
+        )
+        labels = [value.get("file_path", "") for value in chunks.values()]
+    except Exception as error:  # noqa: BLE001 - reported, not swallowed
+        check("both stores are readable", False, f"{type(error).__name__}: {error}")
+        return
+
+    # A label starts with the filename it came from. Ones that do not are not
+    # missing documents — they are chunks whose label the extractor built wrong,
+    # which is a separate problem and gets its own check below.
+    heads = [label.split("›")[0].strip() for label in labels]
+    graph = {head for head in heads if head.endswith(".pdf")}
+    malformed = sorted({label for label, head in zip(labels, heads) if not head.endswith(".pdf")})
+
+    check("both stores are readable", True, f"chroma={len(chroma)} graph={len(graph)} files")
+    only_graph = sorted(graph - chroma)
+    only_chroma = sorted(chroma - graph)
+    check(
+        "the vector store and the graph store hold the same documents",
+        not only_graph and not only_chroma,
+        f"graph-only: {only_graph or 'none'} | chroma-only: {only_chroma or 'none'}",
+    )
+    if only_graph or only_chroma:
+        print("      fix: python scripts/ingest.py   (re-ingests data/raw into Chroma)")
+
+    # A citation label with no file or page is one the responder cannot cite and
+    # the verifier cannot check. The chunk is still retrievable, so this degrades
+    # an answer rather than breaking a run — but silently.
+    check(
+        "every graph chunk has a citable label",
+        not malformed,
+        f"{len(malformed)} without a file prefix: {malformed[:2] or 'none'}",
+    )
+
+
 def check_retrieval() -> None:
     print("\nRetrieval (BM25 only — the one retriever that needs no key)")
     try:
@@ -264,14 +570,21 @@ def check_full_lap() -> None:
         target = "researcher" if first_pass else RESPONDER
         return {"next_node": target, "delegations": [target]}
 
+    async def responder(state: AgentState) -> dict:
+        trace.append(RESPONDER)
+        return {"answer": f"draft {trace.count(RESPONDER)}"}
+
     async def verifier(state: AgentState) -> dict:
         trace.append("verifier")
+        # Reads state.answer, like the real one — so a responder that wrote
+        # nowhere the verifier looks would show up here.
+        assert state.answer, "the verifier saw no answer"
         return {"verdict": "fail", "revisions": state.revisions + 1}
 
     swapped = {
         ORCHESTRATOR: orchestrator,
         "researcher": recorder("researcher", {}),
-        RESPONDER: recorder(RESPONDER, {}),
+        RESPONDER: responder,
         "verifier": verifier,
     }
 
@@ -301,6 +614,11 @@ def check_full_lap() -> None:
     )
     check("the answer was always graded", trace.count(RESPONDER) == trace.count("verifier"))
     check("revisions were counted", result["revisions"] == MAX_REVISIONS)
+    check(
+        "a rejected answer is still returned",
+        AgentState(**result).answer == f"draft {MAX_REVISIONS}",
+        "the cap ends the loop, so the caller gets the last attempt",
+    )
 
 
 def check_live(question: str) -> None:
@@ -331,8 +649,12 @@ def main() -> None:
     check_tool_boundaries()
     check_routers()
     check_orchestrator()
+    check_researcher()
+    check_responder()
+    check_verifier()
     check_declarations()
     check_tool_arguments()
+    check_corpora()
     check_retrieval()
     check_full_lap()
     if args.live:
