@@ -964,28 +964,69 @@ def check_tickets() -> None:
         "only when the user has asked for a ticket" in flat(orch.PROMPT),
     )
 
-    # --- the conversation -------------------------------------------------
+    # --- when the ticket is offered ---------------------------------------
+    #
+    # Every case below was a real reply the agent gave. Offering after "Hello",
+    # and after an answer that had just said it could not find a responsible
+    # role, is what these guard against: the filer would have refused both, so
+    # the offer promised something the rest of the workflow would not do.
     cli = load_cli()
-    offered = AgentState(answer="an answer", delegations=["researcher", RESPONDER])
+    supervisor = "Housekeeping Supervisor (Housekeeping)"
+
+    def reply(**fields) -> AgentState:
+        return AgentState(
+            **{
+                "answer": f"Report it to the {supervisor}.",
+                "delegations": ["researcher", RESPONDER],
+                "verdict": "pass",
+                "ticket_recipient": supervisor,
+                **fields,
+            }
+        )
+
     check(
-        "the ticket is offered after an answer",
-        cli.should_offer_ticket(offered),
+        "the ticket is offered when the answer establishes who to raise it with",
+        cli.should_offer_ticket(reply()),
+    )
+    for label, fields, why in [
+        ("after a greeting", {"answer": "Hello! How can I help?", "ticket_recipient": ""},
+         "nothing to file and nobody to file it with"),
+        ("when no responsible role was found", {"ticket_recipient": ""},
+         "the answer said the documents do not name one"),
+        ("straight after filing one", {"delegations": [RESPONDER, FILER]},
+         "the filer asks its own follow-up"),
+        ("when nothing was answered", {"answer": None}, ""),
+        ("on an answer the verifier rejected", {"verdict": "fail"},
+         "we have just warned that it is not grounded"),
+        ("on an answer nothing graded", {"verdict": "ungraded"}, ""),
+    ]:
+        check(f"it is not offered {label}", not cli.should_offer_ticket(reply(**fields)), why)
+
+    check(
+        "the offer names who the ticket would go to",
+        supervisor in cli.ticket_offer(supervisor)
+        and "data/tickets" in cli.ticket_offer(supervisor),
+        cli.ticket_offer(supervisor),
     )
     check(
-        "it is not offered again straight after filing one",
-        not cli.should_offer_ticket(
-            AgentState(answer="filed it", delegations=[RESPONDER, FILER])
-        ),
-        "the filer asks its own follow-up",
+        "the recipient is an observation, not a grading criterion",
+        "does not affect your verdict" in flat(ver.Verdict.model_fields["ticket_recipient"].description)
+        and "changes nothing about pass or fail" in flat(ver.PROMPT),
+        "a verdict pulled by it would fail thin answers for having no recipient",
     )
     check(
-        "it is not offered when nothing was answered",
-        not cli.should_offer_ticket(AgentState(delegations=[RESPONDER])),
-    )
-    check(
-        "the offer names what saying yes will do",
-        "ticket" in cli.TICKET_OFFER and "data/tickets" in cli.TICKET_OFFER,
-        cli.TICKET_OFFER,
+        "the verifier clears the recipient when it rejects on citations",
+        asyncio.run(
+            ver.run(
+                AgentState(
+                    answer="Ask the Boss.\n\n### References\n- [1] made_up.pdf › page 9",
+                    messages=[ToolMessage("x.pdf › page 1 › Role › Duties", tool_call_id="1")],
+                    ticket_recipient="Boss",
+                )
+            )
+        ).get("ticket_recipient")
+        == "",
+        "a partial update merges, so an earlier draft's recipient would survive",
     )
 
 

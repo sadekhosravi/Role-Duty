@@ -130,3 +130,16 @@ class AgentState(BaseModel):
         ge=0,
         description="How many times the verifier has sent the answer back.",
     )
+
+    ticket_recipient: str = Field(
+        default="",
+        description=(
+            "The role this answer says to raise the matter with, if any. Empty "
+            "when there is nobody to raise it with, or nothing to raise."
+        ),
+    )
+    """Set by the verifier, read by the CLI to decide whether to offer a ticket.
+    It is deliberately not a boolean: naming the role lets the offer say who the
+    ticket would go to, and gives something to check the string against. Written
+    on every verifier pass including the failing ones, so a recipient from an
+    earlier draft cannot survive into a later one that no longer names it."""

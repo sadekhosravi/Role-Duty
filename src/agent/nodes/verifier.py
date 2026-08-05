@@ -78,6 +78,33 @@ confirm, a threshold to locate, an exclusion to check. "Needs more evidence" is
 not usable. "The title 'Assistant Manager' appears in no retrieved section;
 confirm the actual title of the role that approves refunds above the threshold"
 is.
+
+ONE THING YOU ARE NOT GRADING
+
+Alongside the verdict you report `ticket_recipient`: who, if anyone, this should
+be raised with. It is an observation, not a criterion. It changes nothing about
+pass or fail, an answer with no recipient is not worse for it, and you must not
+let it pull the verdict either way.
+
+It exists because the user is offered a ticket after the answer, and offering
+one is only sensible when there is a situation to report and someone to report
+it to. So fill it only when the person described something they have to act on
+AND the answer names the role to take it to.
+
+  "Hello."
+      -> empty. Nothing happened and there is nobody to tell.
+  "Who does the Duty Manager report to?"
+      -> empty. A question about the organisation, not a situation.
+  "I want to donate a painting to the museum, who do I speak to?" answered with
+  "the documents name no role that handles donations"
+      -> empty. There is a situation, but the answer found nobody.
+  "I am a housekeeper, I found a knife in a room" answered with "the documents
+  do not give the full procedure, but the Housekeeping Supervisor
+  (Housekeeping) escalates anything requiring police notification"
+      -> "Housekeeping Supervisor (Housekeeping)". A role that the matter goes
+         to is a role to raise it with, even when the procedure around it is
+         incomplete. Do not read "the documents do not specify X" as "nobody was
+         identified" — read what the answer actually names.
 """
 
 
@@ -104,6 +131,26 @@ class Verdict(BaseModel):
         description=(
             "On a fail: what has to be found to support the answer, named "
             "precisely enough for a worker to act on. Empty on a pass."
+        ),
+    )
+    # Last on purpose. It is not a grading criterion and it must not colour the
+    # verdict — a model that decides "no ticket" first will start reading the
+    # answer as thin. Answering it after the verdict is settled keeps it what it
+    # is: an observation about an answer already judged.
+    ticket_recipient: str = Field(
+        default="",
+        description=(
+            "Who this should be raised with, if anyone. Fill it when BOTH hold: "
+            "the person described something they have to act on — something "
+            "found, something that happened, a situation they do not know how to "
+            "handle — AND the answer names a role to take it to. Give that "
+            "role's title exactly as the answer writes it. A role still counts "
+            "when the answer also says the documents do not spell out the full "
+            "procedure: naming who the matter escalates to IS naming who to "
+            "raise it with. Leave it EMPTY for a greeting or small talk, for a "
+            "general question about how the organisation works or who reports to "
+            "whom, and when the answer names no role at all. Empty is a normal "
+            "outcome and does not affect your verdict either way."
         ),
     )
 
@@ -252,6 +299,7 @@ async def run(state: AgentState) -> dict:
         return {
             "verdict": "fail",
             "revisions": state.revisions + 1,
+            "ticket_recipient": "",
             "messages": [HumanMessage("[verifier] No answer was produced to grade.")],
         }
 
@@ -267,6 +315,10 @@ async def run(state: AgentState) -> dict:
         return {
             "verdict": "fail",
             "revisions": state.revisions + 1,
+            # Cleared, not merely left out. A partial update merges, so an
+            # earlier draft's recipient would otherwise survive into a rejection
+            # of a later draft that no longer names anyone.
+            "ticket_recipient": "",
             "messages": [
                 HumanMessage(
                     _critique(
@@ -299,10 +351,20 @@ async def run(state: AgentState) -> dict:
         # one they have. Failing instead would spend a revision re-answering a
         # question whose answer was never the problem.
         log.warning("grading call failed (%s); returning the answer ungraded", error)
-        return {"verdict": "ungraded"}
+        return {"verdict": "ungraded", "ticket_recipient": ""}
+
+    # The recipient is only kept if it is a string the answer actually contains.
+    # It is a role title produced by a model, and this project's whole history
+    # with role titles says to check rather than trust — an offer to raise the
+    # matter with a role that appears nowhere in the answer would be inventing a
+    # recipient at the last possible moment, where nothing downstream looks.
+    recipient = verdict.ticket_recipient.strip()
+    if recipient and recipient not in state.answer:
+        log.warning("verifier named a recipient absent from the answer: %r", recipient)
+        recipient = ""
 
     if verdict.verdict == "pass":
-        return {"verdict": "pass"}
+        return {"verdict": "pass", "ticket_recipient": recipient}
 
     # The critique goes in as a user turn, not an assistant one: it is input to
     # the next pass, and providers differ on how they treat assistant messages
@@ -310,6 +372,7 @@ async def run(state: AgentState) -> dict:
     return {
         "verdict": "fail",
         "revisions": state.revisions + 1,
+        "ticket_recipient": recipient,
         "messages": [HumanMessage(_critique(verdict))],
     }
 

@@ -9,12 +9,13 @@ Usage:
     python scripts/agent.py "..." --tag baseline       # label the run (repeatable)
     python scripts/agent.py --check-tracing            # verify Langfuse, then exit
 
-The conversation is the point, not a convenience. After an answer the agent
-offers to file a ticket, and "yes" only means something if the previous turn is
-still there to mean it about. This module keeps that transcript — the questions
-and the replies, and nothing else. The evidence behind an answer is not carried
-forward: it can run to tens of thousands of tokens, it is re-retrievable, and
-each turn's working state is deliberately fresh (see graph.run_workflow).
+The conversation is the point, not a convenience. When an answer establishes
+someone to raise a matter with, the agent offers to file them a ticket, and
+"yes" only means something if the previous turn is still there to mean it about.
+This module keeps that transcript — the questions and the replies, and nothing
+else. The evidence behind an answer is not carried forward: it can run to tens
+of thousands of tokens, it is re-retrievable, and each turn's working state is
+deliberately fresh (see graph.run_workflow).
 """
 
 import argparse
@@ -32,34 +33,49 @@ from agent import observability
 from agent.graph import run_workflow
 from agent.state import FILER, RESPONDER
 
-# Offered after every answer written from the documents. Deliberately fixed text
-# rather than something the responder writes: the responder is under a hard rule
-# to put nothing after its References section, and an offer generated per answer
-# is one more place a role title could be invented. The filer works out who the
-# ticket goes to when the user says yes, from the answer that is still in the
-# transcript.
-TICKET_OFFER = (
-    "Would you like me to file a ticket for the responsible person? "
-    "Say yes and I will write it to data/tickets/."
-)
-
 PROMPT = "\nyou> "
 QUIT = {"exit", "quit", ":q", "bye"}
+
+
+def ticket_offer(recipient: str) -> str:
+    """The offer, naming who the ticket would go to.
+
+    Naming them is not decoration. "a ticket for the responsible person" is a
+    question the user cannot answer without re-reading the answer, and it reads
+    as boilerplate — which is exactly what it was when this offer went out after
+    every reply, including "Hello".
+    """
+    return (
+        f"Would you like me to file a ticket for the {recipient}? "
+        "Say yes and I will write it to data/tickets/."
+    )
 
 
 def should_offer_ticket(state) -> bool:
     """Whether to follow this reply with the ticket offer.
 
-    Its own function so the rule can be checked without running a model. Two
-    cases must not get the offer, and both have been easy to get wrong: a turn
-    that ended at the filer has just created a ticket and asks its own
-    follow-up, so offering again would read as a second one; and a run that
-    produced no answer has nothing to raise a ticket about.
+    Its own function so the rule can be checked without running a model, and it
+    has needed the checking. Offering unconditionally was wrong in two ways at
+    once: after "Hello" there is nothing to file, and after an answer that
+    could not find a responsible role there is nobody to file it with — the
+    filer would have refused both, so the offer was writing a cheque the rest
+    of the workflow would not honour.
+
+    The condition is now the filer's own precondition, asked before the offer
+    instead of after the yes: is there a situation to report, and did the
+    answer establish who to report it to. The verifier decides that (it has the
+    answer and the evidence in front of it already, so it costs no extra call)
+    and `state.ticket_recipient` is what it decided.
+
+    A failed or ungraded verdict blocks the offer too. An answer we have just
+    warned the user is not fully grounded is not one to raise a ticket from.
     """
     return (
         bool(state.answer)
         and RESPONDER in state.delegations
         and FILER not in state.delegations
+        and state.verdict == "pass"
+        and bool(state.ticket_recipient)
     )
 
 
@@ -101,7 +117,7 @@ async def turn(
     reply = state.answer or "(no answer was produced)"
 
     if should_offer_ticket(state):
-        reply = f"{reply}\n\n{TICKET_OFFER}"
+        reply = f"{reply}\n\n{ticket_offer(state.ticket_recipient)}"
 
     print(f"\n{reply}")
 

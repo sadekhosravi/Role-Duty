@@ -85,9 +85,9 @@ fresh, so a long conversation cannot use up a later question's turns.
 
 ## Filing a ticket (MCP)
 
-After an answer, the agent offers to file a ticket for the role it identified as
-responsible. Say yes and it writes a Word document to `data/tickets/`, then asks
-what else you need.
+When an answer establishes someone to raise a matter with, the agent offers to
+file them a ticket. Say yes and it writes a Word document to `data/tickets/`,
+then asks what else you need.
 
 ```
 you> i am a housekeeper, i found a knife in the hotel room, what should i do?
@@ -99,8 +99,8 @@ notification [1].
 ### References
 - [1] sample_role_duties_hotel.pdf › page 3 › Housekeeping Supervisor (Housekeeping) › Escalation Path:
 
-Would you like me to file a ticket for the responsible person? Say yes and I
-will write it to data/tickets/.
+Would you like me to file a ticket for the Housekeeping Supervisor
+(Housekeeping)? Say yes and I will write it to data/tickets/.
 
 you> yes
 
@@ -112,6 +112,13 @@ What else do you need?
 
 The ticket carries who it is addressed to, what happened, a summary of the
 situation, the next steps, and the source labels the answer cited.
+
+**When it does not offer.** Only a situation with somebody to take it to gets
+the offer — not a greeting, not a general question about how the organisation
+works, not an answer that could not find a responsible role, and not an answer
+the verifier rejected. The verifier decides, as a by-product of the grading call
+it already makes, and the offer names the role so the question can be answered
+without re-reading the answer.
 
 The writing is done by an **MCP server** in `src/ticket_mcp/`, started as a
 stdio subprocess. It exposes exactly one tool, `create_ticket`, and it owns that
