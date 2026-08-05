@@ -33,8 +33,11 @@ def main() -> None:
     print(f'\nTop {len(results)} results for: "{args.query}"\n')
     for rank, item in enumerate(results, start=1):
         meta = item["metadata"]
-        print(f"[{rank}] {meta['source']} (chunk {meta['index']}) "
-              f"- distance {item['distance']:.4f}")
+        # The stored citation label, which names the section and its owning
+        # role. Falls back to source+index for a store written before labels
+        # existed — re-run scripts/ingest.py to get the full form.
+        label = meta.get("label") or f"{meta['source']} (chunk {meta['index']})"
+        print(f"[{rank}] {label} - distance {item['distance']:.4f}")
         print(item["text"])
         print("-" * 60)
 

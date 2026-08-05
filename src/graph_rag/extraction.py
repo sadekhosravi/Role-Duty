@@ -34,6 +34,32 @@ class Section:
     text: str
 
 
+# Separator between the PDF name and its heading path in a citation label, e.g.
+# "AMG.pdf › 2. Roles › 2.1 Manager". Purely cosmetic — pick any glyph you like.
+LABEL_SEP = " › "
+
+
+def section_label(pdf_name: str, page: int | None, headings: tuple[str, ...]) -> str:
+    """The citation label for one section of a PDF.
+
+    e.g. "sample.pdf › page 25 › Shift Supervisor". The page and heading parts
+    are each omitted when unknown, so a heading-less first page is just
+    "sample.pdf › page 1", and a page-less chunk is "sample.pdf › Overview".
+
+    Lives here, next to Section, rather than in graph_rag.py, because BOTH
+    stores label their sections with it — the graph passes it to LightRAG as a
+    file_path, the vector store keeps it in Chroma metadata. Sharing one
+    implementation is what makes a citation copied out of either tool read the
+    same, and it is deliberate insurance: this module already learned once what
+    happens when the two ingest paths are maintained separately.
+    """
+    parts = [pdf_name]
+    if page is not None:
+        parts.append(f"page {page}")
+    parts.extend(headings)
+    return LABEL_SEP.join(parts)
+
+
 def _normalize_heading(heading: str) -> str:
     """Collapse whitespace so the same heading always yields the same label.
 

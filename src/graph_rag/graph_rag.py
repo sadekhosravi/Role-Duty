@@ -284,23 +284,13 @@ async def build_rag() -> LightRAG:
 
 # --- Ingest: sections -> LightRAG graph ----------------------------------------
 
-# Separator between the PDF name and its heading path in a citation label, e.g.
-# "AMG.pdf › 2. Roles › 2.1 Manager". Purely cosmetic — pick any glyph you like.
-LABEL_SEP = " › "
+# The label builder moved to extraction.py, next to the Section it labels, so
+# the vector store can build identical labels without importing this module and
+# the LightRAG stack behind it. Re-exported here because it was public API of
+# this module first.
+from .extraction import LABEL_SEP, section_label  # noqa: E402
 
-
-def _section_label(pdf_name: str, page: int | None, headings: tuple[str, ...]) -> str:
-    """The citation label (LightRAG file_path) for one section of a PDF.
-
-    e.g. "sample.pdf › page 25 › Shift Supervisor". The page and heading parts
-    are each omitted when unknown, so a heading-less first page is just
-    "sample.pdf › page 1", and a page-less chunk is "sample.pdf › Overview".
-    """
-    parts = [pdf_name]
-    if page is not None:
-        parts.append(f"page {page}")
-    parts.extend(headings)
-    return LABEL_SEP.join(parts)
+_section_label = section_label
 
 
 async def _delete_pdf(rag: LightRAG, pdf_name: str) -> int:

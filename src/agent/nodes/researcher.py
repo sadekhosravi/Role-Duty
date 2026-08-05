@@ -43,8 +43,8 @@ They are listed in the order you should reach for them:
   - naive_rag_search: plain semantic search over document chunks. No graph, no
 reranking, no model calls of its own — the cheapest and fastest of the three,
 and where every search starts. Enough on its own whenever one self-contained
-passage answers the question. Its labels stop at the chunk index, because that
-store keeps no page or section.
+passage answers the question. Its hits carry the same full labels the graph
+returns, inline with each result.
   - graph_rag_search: a knowledge graph of roles, duties and reporting lines,
 plus the source chunks behind it. It returns entities, the relationships
 connecting them, and document chunks. The only tool that returns relationships,
@@ -121,25 +121,22 @@ none, group your findings by organisation rather than merging them.
 3. Citation labels — where they come from
 
   A label is the whole source string a tool gave you, starting with the file
-  name and joined by " › ". How many parts follow depends on which store the
-  hit came from, and BOTH of these are complete labels:
+  name and joined by " › ". All three tools now produce the same shape:
 
-      sample_role_duties.pdf › chunk 7
       sample_role_duties.pdf › page 2 › Shift Supervisor › Key Responsibilities
 
   A label is correct when it matches what the tool printed, character for
-  character — never when it has some particular number of parts. Do not add a
-  page to the first shape to make it look like the second. A page you did not
-  read is a fabrication, and it is worse than the shorter label, because it
-  points confidently at the wrong place.
+  character — never when it looks like the shape above. Some sections have no
+  page or no heading and their labels are correspondingly shorter; copy those
+  as they are. A page you did not read is a fabrication, and it is worse than a
+  short label, because it points confidently at the wrong place.
 
   Each tool hands you that string differently, and getting it from the wrong
   place is how a whole answer ends up uncitable:
 
-  - naive_rag_search: the label follows the result number. It ends at the chunk
-index because that store keeps no page or section — copy what is there and do
-not complete it from memory. This is the tool you will use most, so this is the
-shape most of your labels will have, and a short label from it is correct.
+  - naive_rag_search: the label follows the result number, before the distance.
+Copy it up to the "(distance ...)" and leave that out — it is a similarity
+score, not part of the label.
   - graph_rag_search: the chunks carry a reference_id, not a label. The labels
 are in the Reference Document List at the END of the result, one per line, each
 prefixed with its id in brackets. Look up every chunk you rely on and copy the

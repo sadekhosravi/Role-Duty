@@ -36,9 +36,9 @@ There is currently **no test suite, linter, or formatter** configured.
 Two layers: a `src/rag/` library and thin `scripts/` CLIs. The scripts prepend `src/` to `sys.path` at runtime (`sys.path.insert(...)`) so `rag` imports resolve without installing the package — keep that shim if you add new scripts.
 
 Ingestion data flow (`pipeline.py` orchestrates):
-1. `extractor.extract_chunks()` — Docling `DocumentConverter` parses the PDF, `HybridChunker` splits it into structure-aware chunks, each wrapped in a `Chunk` dataclass (`text`, `source`, `index`).
+1. `extractor.extract_chunks()` — delegates to `graph_rag.extraction.parse_pdf()`, the **same** parser the graph ingest uses, and wraps each `Section` in a `Chunk` dataclass (`text`, `source`, `index`, `label`, `page`, `headings`). Sharing that call is deliberate: it carries the owning role into every sub-section's text and label, and it was added here only after the two ingest paths drifted and the vector store spent a while returning role-less chunks that the agent then mis-attributed. Do not reintroduce a separate chunker here.
 2. `vector_store.add_chunks()` — writes chunks to a persistent Chroma collection. **Chroma computes the embeddings at `add()` time** via the collection's embedding function; the code never embeds text itself.
-3. Chunk IDs are `"{source}:{index}"`, so re-ingesting the same file **overwrites** rather than duplicates.
+3. Chunk IDs are `"{source}:{index}"`. `add_chunks` deletes a document's existing rows before writing, because a re-ingest can now produce fewer sections than a previous run did and the surplus ids would otherwise survive as retrievable orphans.
 
 Querying (`query.py`) calls `vector_store.similarity_search()` and prints ranked chunks with source/distance. There is no generation/answer step — retrieval is the end of the pipeline today.
 

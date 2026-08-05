@@ -50,12 +50,26 @@ async def naive_rag_search(question: str, top_k: int = 5) -> str:
     hits = similarity_search(get_collection(), question, n_results=top_k)
     if not hits:
         return "[no vector matches — is the Chroma store ingested?]"
-    # Labels use the same " › " shape as the graph and keyword tools, so a
-    # citation copied out of any of the three reads the same way. This store
-    # holds only a file and a chunk index — the Chroma ingest keeps no page or
-    # section — so the label stops there rather than inventing the rest.
     return "\n\n".join(
-        f"[{i}] {hit['metadata']['source']} › chunk {hit['metadata']['index']} "
-        f"(distance {hit['distance']:.4f})\n{hit['text']}"
+        f"[{i}] {_label(hit['metadata'])} (distance {hit['distance']:.4f})\n{hit['text']}"
         for i, hit in enumerate(hits, 1)
     )
+
+
+def _label(metadata: dict) -> str:
+    """The citation label for one hit.
+
+    Read from metadata rather than assembled here: it was built at ingest time
+    by the same function the graph ingest uses, so a citation copied out of this
+    tool is character-identical to the same section cited from graph_rag_search.
+
+    The fallback is for a store written before labels existed. Without it those
+    rows would cite the string "None", and the verifier — which compares a
+    citation against what a tool actually returned — would reject every answer
+    resting on one, giving no hint that the cause is a stale ingest rather than
+    a bad answer.
+    """
+    label = metadata.get("label")
+    if label:
+        return label
+    return f"{metadata['source']} › chunk {metadata['index']} [stale ingest — re-run scripts/ingest.py]"

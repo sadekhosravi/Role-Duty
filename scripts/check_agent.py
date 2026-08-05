@@ -477,19 +477,25 @@ def check_retrieval_cascade() -> None:
         "naive already ran, so retrying it is the one thing that cannot help",
     )
 
-    # Cheap-first means most labels now come from the store that keeps no page
-    # or section. Both writers have to accept a short label, or the run ends in
-    # the failure this project has already paid for twice: invented pages.
+    # Cheap-first means most labels now come from the vector store, so what it
+    # writes at ingest is what most citations will be. Both writers must accept
+    # a label shorter than the canonical shape without padding it out — invented
+    # pages are the failure this project has already paid for twice.
     for label, prompt in (("researcher", res.PROMPT), ("responder", resp.PROMPT)):
         check(
-            f"the {label} is told a short label is complete",
-            "chunk <n>" in flat(prompt) or "› chunk 7" in flat(prompt),
-            "the cheap store keeps no page or section",
+            f"the {label} is told a short label is not an incomplete one",
+            "short label is not an incomplete one" in flat(prompt)
+            or "copy those as they are" in flat(prompt),
         )
     check(
         "the responder is told never to extend one",
         "Never extend it" in flat(resp.PROMPT),
         "adding a plausible page is the fabrication this guards",
+    )
+    check(
+        "the researcher is told the distance is not part of the label",
+        "not part of the label" in flat(res.PROMPT),
+        "the vector tool prints a similarity score after the label",
     )
 
 
@@ -555,13 +561,13 @@ def check_corpora() -> None:
     """
     print("\nCorpus agreement between the two stores")
     try:
+        import graph_rag.extraction as graph_extraction
+        import rag.extractor as rag_extractor
         from agent.tools._stores import get_collection
         from graph_rag.graph_rag import WORKING_DIR
 
-        chroma = {
-            meta["source"]
-            for meta in get_collection().get(include=["metadatas"])["metadatas"]
-        }
+        vector_meta = get_collection().get(include=["metadatas"])["metadatas"]
+        chroma = {meta["source"] for meta in vector_meta}
         chunks = json.loads(
             (Path(WORKING_DIR) / "kv_store_text_chunks.json").read_text(encoding="utf-8")
         )
@@ -595,6 +601,24 @@ def check_corpora() -> None:
         "every graph chunk has a citable label",
         not malformed,
         f"{len(malformed)} without a file prefix: {malformed[:2] or 'none'}",
+    )
+
+    # The same demand of the vector store, which only started meeting it once
+    # both ingests shared one extractor. A row with no label is one written by
+    # the old chunking: its text names no role, so anything retrieved from it
+    # gets attributed by guesswork. That is not a degraded citation, it is how
+    # the agent came to report a reporting line the documents do not contain.
+    unlabelled = [meta for meta in vector_meta if not meta.get("label")]
+    check(
+        "every vector chunk has a citable label",
+        not unlabelled,
+        f"{len(unlabelled)} of {len(vector_meta)} unlabelled"
+        + (" — re-run: python scripts/ingest.py" if unlabelled else ""),
+    )
+    check(
+        "both stores label sections with the same function",
+        rag_extractor.section_label is graph_extraction.section_label,
+        "separate implementations are what let the two ingests drift apart",
     )
 
 
