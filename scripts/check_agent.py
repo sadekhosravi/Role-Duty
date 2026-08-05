@@ -24,11 +24,13 @@ from langchain_core.messages import HumanMessage, ToolMessage
 from pydantic import ValidationError
 
 from agent import WORKFLOW, AgentState, NodeSpec, Workflow, build_graph
+from agent.nodes import filer as fil
 from agent.nodes import orchestrator as orch
 from agent.nodes import researcher as res
 from agent.nodes import responder as resp
 from agent.nodes import verifier as ver
 from agent.state import (
+    FILER,
     MAX_DELEGATIONS,
     MAX_RETRIEVALS,
     MAX_REVISIONS,
@@ -38,6 +40,8 @@ from agent.state import (
 )
 from agent.tools import graph_rag_search, keyword_search, naive_rag_search
 from agent.tools import vector_search as vec
+from agent.tools.tickets import CREATE_TICKET, ticket_tools
+from agent.tools.tickets import load_tools as ticket_load_tools
 
 PASSED, FAILED = [], []
 
@@ -50,6 +54,24 @@ def check(label: str, ok: bool, detail: str = "") -> None:
 def flat(text: str) -> str:
     """Collapse whitespace, so a phrase check is not defeated by a line wrap."""
     return " ".join(text.split())
+
+
+def load_cli():
+    """Import scripts/agent.py as a module.
+
+    It cannot simply be imported: its file is `agent.py` and it sits next to a
+    package also called `agent`, which is already on sys.path and wins. Loading
+    it from its path under another name is the only way to check the CLI's own
+    rules — and those rules decide what the user is offered, so they are worth
+    checking.
+    """
+    import importlib.util
+
+    path = Path(__file__).with_name("agent.py")
+    spec = importlib.util.spec_from_file_location("_cli_under_check", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def rejects(thunk) -> tuple[bool, str]:
@@ -94,6 +116,16 @@ def check_structure() -> None:
     check("responder always hands to the verifier", (RESPONDER, "verifier") in edges)
     check("the verifier can end the run", ("verifier", "__end__") in edges)
     check("the verifier can send work back", ("verifier", ORCHESTRATOR) in edges)
+    check(
+        "the filer ends the run itself",
+        (FILER, "__end__") in edges,
+        "it acts rather than gathers, so there is nothing to hand back",
+    )
+    check(
+        "the filer never routes onward to the responder or the verifier",
+        not any((FILER, target) in edges for target in (RESPONDER, "verifier")),
+        "a ticket confirmation is not an answer to be graded for citations",
+    )
 
 
 def check_tool_boundaries() -> None:
@@ -104,8 +136,21 @@ def check_tool_boundaries() -> None:
         len(by_name["researcher"].tools) == 3,
     )
     check(
-        "gap_auditor is graph-only",
-        [tool.name for tool in by_name["gap_auditor"].tools] == ["graph_rag_search"],
+        "the filer has the MCP ticket tool",
+        CREATE_TICKET in [tool.name for tool in by_name[FILER].tools],
+        f"discovered: {[tool.name for tool in by_name[FILER].tools]}",
+    )
+    check(
+        "the filer cannot retrieve",
+        not ({"graph_rag_search", "naive_rag_search", "keyword_search"}
+             & {tool.name for tool in by_name[FILER].tools}),
+        "it fills the ticket from the conversation, not from a fresh search",
+    )
+    check(
+        "no node but the filer can write a ticket",
+        [spec.name for spec in WORKFLOW.nodes
+         if CREATE_TICKET in {tool.name for tool in spec.tools}] == [FILER],
+        "the one tool with a side effect is listed exactly once",
     )
     check(
         "orchestrator, responder and verifier have no tools",
@@ -724,6 +769,226 @@ def check_full_lap() -> None:
     )
 
 
+# ------------------------------------------------------------------- tickets
+
+
+def check_tickets() -> None:
+    """The MCP server, the document it writes, and the node that calls it.
+
+    All of it offline: the server is a local subprocess and the model is never
+    involved. What this proves is that the one tool with a side effect really
+    starts, really writes the four fields a ticket has to carry, and really
+    refuses the calls that would produce a ticket nobody can act on.
+    """
+    print("\nTickets (MCP server + Word document)")
+    import tempfile
+
+    import docx
+
+    from ticket_mcp import Ticket, write_ticket
+
+    # --- the document -----------------------------------------------------
+    with tempfile.TemporaryDirectory() as workspace:
+        directory = Path(workspace)
+        ticket = Ticket(
+            addressed_to="Housekeeping Supervisor (Housekeeping)",
+            subject="Knife found in guest room",
+            what_happened="A housekeeper found a knife while servicing a room.",
+            situation_summary="The item may have to be addressed with the Police.",
+            next_steps=("Leave the item in place.", "Report it to the Supervisor."),
+            raised_by="Housekeeper",
+            organisation="Hotel",
+            priority="urgent",
+            references=("sample_role_duties_hotel.pdf › page 3 › Housekeeping Supervisor",),
+        )
+        path = write_ticket(ticket, directory)
+        check("a ticket is written as a .docx", path.suffix == ".docx" and path.exists())
+
+        document = docx.Document(path)
+        text = "\n".join(p.text for p in document.paragraphs)
+        cells = [cell.text for row in document.tables[0].rows for cell in row.cells]
+        check(
+            "it names who it is addressed to",
+            ticket.addressed_to in cells,
+            ticket.addressed_to,
+        )
+        for label, value in [
+            ("what happened", ticket.what_happened),
+            ("a summary of the situation", ticket.situation_summary),
+            ("the next steps", ticket.next_steps[0]),
+            ("the source labels behind it", ticket.references[0]),
+        ]:
+            check(f"it carries {label}", value in text)
+
+        # A second ticket in the same second must not silently replace the
+        # first: the id is only precise to the second, and the one that would
+        # disappear is an earlier report of the same incident.
+        twin = write_ticket(ticket, directory)
+        check(
+            "two tickets filed in the same second both survive",
+            twin != path and twin.exists() and path.exists(),
+            twin.name,
+        )
+
+    required = dict(
+        addressed_to="X", subject="Y", what_happened="Z", situation_summary="W"
+    )
+    for label, bad in [
+        ("a ticket with no recipient", {"addressed_to": "  "}),
+        ("a ticket with no account of what happened", {"what_happened": ""}),
+        ("an invented priority", {"priority": "whenever"}),
+    ]:
+        refused, message = rejects(lambda bad=bad: Ticket(**(required | bad)))
+        check(f"{label} is refused", refused, message)
+
+    # --- the MCP server ---------------------------------------------------
+    tools = ticket_tools()
+    check(
+        "the ticket server starts and offers its tool over MCP",
+        CREATE_TICKET in [tool.name for tool in tools],
+        f"offers {[tool.name for tool in tools]}",
+    )
+
+    tool = next(tool for tool in tools if tool.name == CREATE_TICKET)
+    schema = tool.args_schema or {}
+    properties = schema.get("properties", {})
+    check(
+        "its schema came from the server, not from a copy in this repo",
+        set(properties) >= {"addressed_to", "what_happened", "situation_summary", "next_steps"},
+        f"fields: {sorted(properties)}",
+    )
+    check(
+        "the four fields a ticket needs are all required",
+        set(schema.get("required", []))
+        >= {"addressed_to", "what_happened", "situation_summary", "next_steps"},
+        f"required: {sorted(schema.get('required', []))}",
+    )
+    check(
+        "every field tells the model what belongs in it",
+        all(field.get("description") for field in properties.values()),
+        "the description IS the instruction — there is nowhere else to say it",
+    )
+
+    with tempfile.TemporaryDirectory() as workspace:
+        import os
+
+        saved = os.environ.get("TICKETS_DIR")
+        os.environ["TICKETS_DIR"] = workspace
+        try:
+            # Discovered again rather than reusing the cached handle. A tool
+            # carries the environment its server will be spawned with, captured
+            # when it was discovered — so the cached one would ignore
+            # TICKETS_DIR and write a stray ticket into the real data/tickets.
+            # It did exactly that the first time this check was written.
+            fresh = asyncio.run(ticket_load_tools())
+            writer = next(t for t in fresh if t.name == CREATE_TICKET)
+            result = str(
+                asyncio.run(
+                    writer.ainvoke(
+                        {
+                            "addressed_to": "Housekeeping Supervisor",
+                            "subject": "Round trip",
+                            "what_happened": "A check called the tool.",
+                            "situation_summary": "It should have written a file.",
+                            "next_steps": ["Read the file back."],
+                        }
+                    )
+                )
+            )
+            written = list(Path(workspace).glob("*.docx"))
+            check("calling it over MCP writes a real file", len(written) == 1, result[:80])
+            check(
+                "it reports the path it wrote to",
+                bool(written) and written[0].stem in result,
+            )
+
+            # Round trip: the node reads the destination back out of the tool's
+            # real output. Checking the regex against a string written here
+            # would only prove the regex matches itself — the wording that has
+            # to keep matching belongs to the server, so it is the server's
+            # output that gets parsed.
+            raw = asyncio.run(
+                writer.ainvoke(
+                    {
+                        "addressed_to": "Housekeeping Supervisor",
+                        "subject": "Round trip parse",
+                        "what_happened": "A check called the tool.",
+                        "situation_summary": "The node must find the path in this.",
+                        "next_steps": ["Parse it back."],
+                    }
+                )
+            )
+            parsed = fil._saved_path(
+                [ToolMessage(raw, tool_call_id="1", name=CREATE_TICKET)]
+            )
+            check(
+                "the filer can read the path back out of the tool's own result",
+                bool(parsed) and Path(workspace).name in str(parsed),
+                str(parsed),
+            )
+        finally:
+            if saved is None:
+                os.environ.pop("TICKETS_DIR", None)
+            else:
+                os.environ["TICKETS_DIR"] = saved
+
+    # --- the node ---------------------------------------------------------
+    check(
+        "the filer is capped at one ticket per turn",
+        fil.MAX_TICKETS == 1,
+        "a second call would duplicate an incident already in the queue",
+    )
+    filed = [ToolMessage("done", tool_call_id="1", name=CREATE_TICKET)]
+    check(
+        "a filed ticket is counted from the tool's own result",
+        fil._tickets_filed(filed) == 1
+        and fil._tickets_filed([ToolMessage("x", tool_call_id="2", name="other")]) == 0,
+    )
+    check(
+        "at the cap it is told to stop, and below it to file",
+        "Do not call it again" in fil._note(fil.MAX_TICKETS)
+        and "File the ticket now" in fil._note(0),
+    )
+    check(
+        "the filer writes no References section",
+        "do not write a `### References` section" in flat(fil.PROMPT),
+        "a confirmation of an action cites nothing, and the verifier never sees it",
+    )
+    check(
+        "the filer keeps the conversation going",
+        "ask what else they need" in flat(fil.PROMPT),
+        "filing is not a sign-off",
+    )
+    check(
+        "the orchestrator is told never to file unasked",
+        "only when the user has asked for a ticket" in flat(orch.PROMPT),
+    )
+
+    # --- the conversation -------------------------------------------------
+    cli = load_cli()
+    offered = AgentState(answer="an answer", delegations=["researcher", RESPONDER])
+    check(
+        "the ticket is offered after an answer",
+        cli.should_offer_ticket(offered),
+    )
+    check(
+        "it is not offered again straight after filing one",
+        not cli.should_offer_ticket(
+            AgentState(answer="filed it", delegations=[RESPONDER, FILER])
+        ),
+        "the filer asks its own follow-up",
+    )
+    check(
+        "it is not offered when nothing was answered",
+        not cli.should_offer_ticket(AgentState(delegations=[RESPONDER])),
+    )
+    check(
+        "the offer names what saying yes will do",
+        "ticket" in cli.TICKET_OFFER and "data/tickets" in cli.TICKET_OFFER,
+        cli.TICKET_OFFER,
+    )
+
+
 # ------------------------------------------------------------- observability
 
 
@@ -881,6 +1146,7 @@ def main() -> None:
     check_corpora()
     check_retrieval()
     check_full_lap()
+    check_tickets()
     check_observability()
     if args.live:
         check_live(args.question)

@@ -20,16 +20,21 @@ system on, one step at a time.
 Role-Duty/
 ├── data/
 │   ├── raw/            # drop your PDFs here
-│   └── chroma/         # persisted vector DB (created automatically)
+│   ├── chroma/         # persisted vector DB (created automatically)
+│   └── tickets/        # filed tickets, as .docx (created automatically)
 ├── scripts/
 │   ├── ingest.py       # PDF -> chunks -> embeddings -> Chroma
-│   └── query.py        # prompt -> similarity search
-└── src/rag/
-    ├── config.py       # all settings in one place
-    ├── extractor.py    # Docling: PDF -> text chunks
-    ├── embeddings.py   # the embedding model (swap it here)
-    ├── vector_store.py # Chroma wrapper
-    └── pipeline.py     # ingestion orchestration
+│   ├── query.py        # prompt -> similarity search
+│   ├── agent.py        # a conversation with the agent
+│   └── check_agent.py  # the agent's wiring, checked offline
+├── src/rag/
+│   ├── config.py       # all settings in one place
+│   ├── extractor.py    # Docling: PDF -> text chunks
+│   ├── embeddings.py   # the embedding model (swap it here)
+│   ├── vector_store.py # Chroma wrapper
+│   └── pipeline.py     # ingestion orchestration
+├── src/agent/          # the LangGraph workflow — see src/agent/graph.py
+└── src/ticket_mcp/     # MCP server: writes a ticket as a Word document
 ```
 
 ## Setup
@@ -60,6 +65,73 @@ cp .env.example .env          # then edit if you want to change defaults
    python scripts/query.py "What is the refund policy?"
    python scripts/query.py "What is the refund policy?" --top-k 3
    ```
+
+## Talking to the agent
+
+`scripts/agent.py` is a conversation, not a one-shot query. Ask something, get a
+cited answer, and then keep going — the follow-up turns can refer back to what
+was just said.
+
+```bash
+python scripts/agent.py                                  # start empty
+python scripts/agent.py "I found a knife in a guest room, what should I do?"
+python scripts/agent.py "..." --once                     # answer and exit
+python scripts/agent.py "..." --trace                    # show the tool calls
+```
+
+Only the questions and the replies are carried between turns — not the evidence
+behind them. Each turn's retrieval budget, revision count and verdict start
+fresh, so a long conversation cannot use up a later question's turns.
+
+## Filing a ticket (MCP)
+
+After an answer, the agent offers to file a ticket for the role it identified as
+responsible. Say yes and it writes a Word document to `data/tickets/`, then asks
+what else you need.
+
+```
+you> i am a housekeeper, i found a knife in the hotel room, what should i do?
+
+The Housekeeping Supervisor (Housekeeping) escalates to the Duty Manager
+(Front of House) for anything found in a room that requires police
+notification [1].
+
+### References
+- [1] sample_role_duties_hotel.pdf › page 3 › Housekeeping Supervisor (Housekeeping) › Escalation Path:
+
+Would you like me to file a ticket for the responsible person? Say yes and I
+will write it to data/tickets/.
+
+you> yes
+
+I created a ticket for the Housekeeping Supervisor (Housekeeping). It is saved
+to data/tickets/TKT-20260805-125055-knife-found-in-hotel-room.docx …
+
+What else do you need?
+```
+
+The ticket carries who it is addressed to, what happened, a summary of the
+situation, the next steps, and the source labels the answer cited.
+
+The writing is done by an **MCP server** in `src/ticket_mcp/`, started as a
+stdio subprocess. It exposes exactly one tool, `create_ticket`, and it owns that
+tool's schema — nothing in `src/agent/` declares what a ticket looks like, it
+just asks the server what it offers. Run it standalone to check it starts:
+
+```bash
+python -m ticket_mcp        # waits on stdin for MCP traffic; Ctrl-C to stop
+```
+
+Two constraints are worth knowing, because both were mistakes waiting to happen:
+
+- **Only the `filer` node has that tool.** Tool access is per node, so no other
+  node can write a file, and `scripts/check_agent.py` asserts the tool appears in
+  exactly one node's list.
+- **One ticket per turn, and only when asked.** Past the cap the tool is
+  unbound rather than discouraged, and the orchestrator is told that an
+  unasked-for ticket is a real document in someone's queue.
+
+`TICKETS_DIR` moves where tickets are written (default `data/tickets`).
 
 ## Observability (Langfuse)
 

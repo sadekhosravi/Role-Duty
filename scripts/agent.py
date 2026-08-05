@@ -1,28 +1,77 @@
-"""CLI: ask the agentic RAG workflow a question.
+"""CLI: a conversation with the agentic RAG workflow.
 
 Usage:
-    python scripts/agent.py "Who authorizes a UPS bypass?"
-    python scripts/agent.py "..." --trace              # show which tools it called
+    python scripts/agent.py                            # start a conversation
+    python scripts/agent.py "Who authorizes a UPS bypass?"   # opens with that
+    python scripts/agent.py "..." --once               # answer once and exit
+    python scripts/agent.py "..." --trace              # show which tools it ran
     python scripts/agent.py "..." --session demo-1     # group runs in Langfuse
     python scripts/agent.py "..." --tag baseline       # label the run (repeatable)
     python scripts/agent.py --check-tracing            # verify Langfuse, then exit
+
+The conversation is the point, not a convenience. After an answer the agent
+offers to file a ticket, and "yes" only means something if the previous turn is
+still there to mean it about. This module keeps that transcript — the questions
+and the replies, and nothing else. The evidence behind an answer is not carried
+forward: it can run to tens of thousands of tokens, it is re-retrievable, and
+each turn's working state is deliberately fresh (see graph.run_workflow).
 """
 
 import argparse
 import asyncio
 import sys
+import uuid
 from pathlib import Path
 
 # Make the src/ packages importable when running as a plain script.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
+
 from agent import observability
 from agent.graph import run_workflow
+from agent.state import FILER, RESPONDER
+
+# Offered after every answer written from the documents. Deliberately fixed text
+# rather than something the responder writes: the responder is under a hard rule
+# to put nothing after its References section, and an offer generated per answer
+# is one more place a role title could be invented. The filer works out who the
+# ticket goes to when the user says yes, from the answer that is still in the
+# transcript.
+TICKET_OFFER = (
+    "Would you like me to file a ticket for the responsible person? "
+    "Say yes and I will write it to data/tickets/."
+)
+
+PROMPT = "\nyou> "
+QUIT = {"exit", "quit", ":q", "bye"}
 
 
-async def run(args: argparse.Namespace) -> None:
+def should_offer_ticket(state) -> bool:
+    """Whether to follow this reply with the ticket offer.
+
+    Its own function so the rule can be checked without running a model. Two
+    cases must not get the offer, and both have been easy to get wrong: a turn
+    that ended at the filer has just created a ticket and asks its own
+    follow-up, so offering again would read as a second one; and a run that
+    produced no answer has nothing to raise a ticket about.
+    """
+    return (
+        bool(state.answer)
+        and RESPONDER in state.delegations
+        and FILER not in state.delegations
+    )
+
+
+async def turn(
+    question: str,
+    history: list[AnyMessage],
+    args: argparse.Namespace,
+) -> None:
+    """Run one turn, print the reply, and record both ends of it in `history`."""
     state, trace_url = await run_workflow(
-        args.question,
+        question,
+        history=history,
         session_id=args.session,
         user_id=args.user,
         tags=args.tag or None,
@@ -49,7 +98,17 @@ async def run(args: argparse.Namespace) -> None:
             file=sys.stderr,
         )
 
-    print(state.answer or "(no answer was produced)")
+    reply = state.answer or "(no answer was produced)"
+
+    if should_offer_ticket(state):
+        reply = f"{reply}\n\n{TICKET_OFFER}"
+
+    print(f"\n{reply}")
+
+    # Both ends go in, and the offer goes in with the reply. Dropping it would
+    # leave the next turn's "yes" agreeing to nothing on record.
+    history.append(HumanMessage(question))
+    history.append(AIMessage(reply))
 
     # Flushed before the URL is printed, not after: Langfuse batches in a
     # background thread, and a link offered before the trace has been sent is a
@@ -59,15 +118,52 @@ async def run(args: argparse.Namespace) -> None:
         print(f"\ntrace: {trace_url}", file=sys.stderr)
 
 
+async def converse(args: argparse.Namespace) -> None:
+    """Answer the opening question if there is one, then keep taking turns."""
+    history: list[AnyMessage] = []
+
+    if args.question:
+        await turn(args.question, history, args)
+        if args.once:
+            return
+
+    print(f"\n(type {' or '.join(sorted(QUIT))} to leave, or Ctrl-C)", file=sys.stderr)
+    while True:
+        try:
+            question = input(PROMPT).strip()
+        except (EOFError, KeyboardInterrupt):
+            # A piped stdin that runs out, or Ctrl-C. Both mean "done", and
+            # neither is an error worth a traceback.
+            print(file=sys.stderr)
+            return
+        if not question:
+            continue
+        if question.lower() in QUIT:
+            return
+        await turn(question, history, args)
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Ask the agentic RAG workflow.")
-    parser.add_argument("question", nargs="?", help="Your natural-language question.")
+    parser = argparse.ArgumentParser(description="Talk to the agentic RAG workflow.")
+    parser.add_argument(
+        "question",
+        nargs="?",
+        help="An opening question. Without one, the conversation starts empty.",
+    )
+    parser.add_argument(
+        "--once",
+        action="store_true",
+        help="Answer the opening question and exit instead of continuing.",
+    )
     parser.add_argument(
         "--trace", action="store_true", help="Print the tool calls it made."
     )
     parser.add_argument(
         "--session",
-        help="Langfuse session id. Runs sharing one are grouped as a conversation.",
+        help=(
+            "Langfuse session id. Every turn of this conversation is filed "
+            "under it. Defaults to a new id per conversation."
+        ),
     )
     parser.add_argument("--user", help="Langfuse user id to attribute the run to.")
     parser.add_argument(
@@ -87,10 +183,15 @@ def main() -> None:
         print(("ok: " if ok else "not tracing: ") + message)
         raise SystemExit(0 if ok else 1)
 
-    if not args.question:
-        parser.error("a question is required (or use --check-tracing)")
+    if args.once and not args.question:
+        parser.error("--once needs a question to answer")
 
-    asyncio.run(run(args))
+    # One session id for the whole conversation, so its turns are grouped in
+    # Langfuse rather than arriving as unrelated traces. Generated here because
+    # this is what knows where a conversation begins and ends.
+    args.session = args.session or f"cli-{uuid.uuid4().hex[:8]}"
+
+    asyncio.run(converse(args))
 
 
 if __name__ == "__main__":

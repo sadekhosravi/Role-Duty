@@ -41,8 +41,7 @@ from pydantic import BaseModel, ConfigDict, Field
 # produces a silently disconnected graph rather than an error.
 ORCHESTRATOR = "orchestrator"
 RESEARCHER = "researcher"
-GAP_AUDITOR = "gap_auditor"
-NOTIFIER = "notifier"
+FILER = "filer"
 RESPONDER = "responder"
 VERIFIER = "verifier"
 
@@ -51,7 +50,7 @@ VERIFIER = "verifier"
 # unconstrained router loops between workers until it hits the recursion limit.
 # As a Literal it reaches the model as a JSON-schema enum, so an invented
 # destination is rejected before it can be routed on.
-WorkerName = Literal["researcher", "gap_auditor", "notifier", "responder"]
+WorkerName = Literal["researcher", "filer", "responder"]
 WORKERS: tuple[str, ...] = get_args(WorkerName)
 
 # How many times the verifier may send an answer back for another pass. The loop

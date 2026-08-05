@@ -1,8 +1,7 @@
 """The LangGraph workflow: an orchestrator delegating to specialist nodes.
 
-    START -> orchestrator -> researcher   -+
-                          -> gap_auditor  -+-> back to orchestrator
-                          -> notifier     -+
+    START -> orchestrator -> researcher -> back to orchestrator
+                          -> filer -> END
                           -> responder -> verifier -> END
                                                    -> back to orchestrator
 
@@ -11,6 +10,11 @@ that decides what happens next: it picks one worker, that worker reports back,
 and it picks again until it routes to the responder. The responder's draft then
 goes to the verifier, which either ends the run or sends it back around.
 
+The filer is the exception, and the only worker that does not hand back. It
+takes an action rather than gathering evidence, so there is nothing for the
+orchestrator to do with its result and nothing for the verifier to grade: its
+confirmation is already the thing the user should read. See nodes/filer.py.
+
 This module owns only the wiring. What each node *is* — its prompt, its body,
 its tools — lives in its own file under nodes/, and nothing there knows about
 the edges. Implementing a node means replacing one stub; no edges change.
@@ -18,8 +22,10 @@ the edges. Implementing a node means replacing one stub; no edges change.
 Tool access is per node, not global. A NodeSpec lists the tools its node may
 call and it is handed nothing else: only those are bound to its model, so it
 cannot name a tool outside its list, and each node gets its own executor, so it
-cannot reach another node's either. MCP tools, when they arrive, are ordinary
-tools — they go in a node's list and change nothing here.
+cannot reach another node's either. That boundary is what confines the one tool
+with side effects: `create_ticket` is listed by the filer and by nothing else,
+so no other node can write a file. MCP tools turned out to be ordinary tools —
+they go in a node's list and change nothing here.
 
 An executor node (`<name>_tools`) is not a reasoning step; it is LangGraph's
 mechanical runner for whatever its node asked for, and it always hands control
@@ -37,7 +43,9 @@ Usage:
 
 from __future__ import annotations
 
-from langchain_core.messages import HumanMessage
+from collections.abc import Sequence
+
+from langchain_core.messages import AnyMessage, HumanMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -46,9 +54,8 @@ from agent.nodes import NODE_SPECS
 from agent.observability import trace_run
 from agent.spec import NodeSpec
 from agent.state import (
-    GAP_AUDITOR,
+    FILER,
     MAX_REVISIONS,
-    NOTIFIER,
     ORCHESTRATOR,
     RESEARCHER,
     RESPONDER,
@@ -59,7 +66,7 @@ from agent.state import (
 
 # Nodes the wiring below refers to by name. Kept next to the wiring so adding an
 # edge and forgetting the node it points at is caught by validation.
-WIRED_NODES = (ORCHESTRATOR, RESEARCHER, GAP_AUDITOR, NOTIFIER, RESPONDER, VERIFIER)
+WIRED_NODES = (ORCHESTRATOR, RESEARCHER, FILER, RESPONDER, VERIFIER)
 
 
 def _route_to_worker(state: AgentState) -> str:
@@ -147,8 +154,11 @@ class Workflow(BaseModel):
         builder.add_conditional_edges(ORCHESTRATOR, _route_to_worker, list(WORKERS))
 
         # Workers report back and let the orchestrator decide again.
-        for name in (RESEARCHER, GAP_AUDITOR, NOTIFIER):
-            self._continue_from(builder, name, ORCHESTRATOR)
+        self._continue_from(builder, RESEARCHER, ORCHESTRATOR)
+
+        # The filer ends the run instead of reporting back: it acts rather than
+        # gathers, and its confirmation is already the user-facing reply.
+        self._continue_from(builder, FILER, END)
 
         # The answer is always graded before it can leave.
         self._continue_from(builder, RESPONDER, VERIFIER)
@@ -184,6 +194,7 @@ def build_graph(workflow: Workflow = WORKFLOW):
 async def run_workflow(
     question: str,
     *,
+    history: Sequence[AnyMessage] = (),
     session_id: str | None = None,
     user_id: str | None = None,
     tags: list[str] | None = None,
@@ -195,6 +206,18 @@ async def run_workflow(
     degraded trace, it gets no trace, and the gap is invisible until someone
     goes looking for a run that was never recorded.
 
+    `history` carries earlier turns of the same conversation, which is what lets
+    "yes, file it" mean anything. It is passed in by the caller rather than kept
+    in a LangGraph checkpointer, and that is a decision worth stating: this
+    state is the work on ONE request. `delegations` accumulates under
+    `operator.add`, `revisions` counts up, `verdict` is about the current
+    answer — checkpointing the lot would start the second turn with the first
+    turn's budget already spent and its verdict still attached. Keeping the
+    conversation outside and the working state fresh per turn means neither can
+    leak into the other. The caller (see scripts/agent.py) keeps the transcript
+    it wants remembered, which is the question-and-answer pairs, not every tool
+    result behind them.
+
     Note the explicit HumanMessage: the `("user", "...")` shorthand is a
     convenience of the add_messages reducer, and constructing AgentState
     directly goes straight to Pydantic, which validates against AnyMessage.
@@ -204,7 +227,7 @@ async def run_workflow(
     """
     with trace_run(question, session_id=session_id, user_id=user_id, tags=tags) as trace:
         result = await build_graph().ainvoke(
-            AgentState(messages=[HumanMessage(question)]),
+            AgentState(messages=[*history, HumanMessage(question)]),
             config={"callbacks": trace.callbacks},
         )
         # ainvoke returns a plain dict, not an AgentState — see state.py.
