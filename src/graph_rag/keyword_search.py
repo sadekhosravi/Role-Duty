@@ -64,6 +64,16 @@ def _load_chunks() -> list[dict[str, str]]:
     return chunks
 
 
+def indexed_chunk_count() -> int:
+    """How many chunks the graph ingest has indexed. 0 when nothing has been.
+
+    The BM25 corpus size, which is also the cheapest honest answer to "is the
+    graph store populated" — cheaper than opening LightRAG, which reloads the
+    whole graph to tell you the same thing.
+    """
+    return len(_load_chunks())
+
+
 def keyword_search(question: str, top_k: int = 5) -> list[KeywordHit]:
     """Rank indexed sections by BM25 keyword overlap with the question.
 

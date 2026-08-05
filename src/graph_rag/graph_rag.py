@@ -313,7 +313,7 @@ async def _delete_pdf(rag: LightRAG, pdf_name: str) -> int:
     return len(doc_ids)
 
 
-async def ingest(path: str | Path) -> int:
+async def ingest(path: str | Path, rag: LightRAG | None = None) -> int:
     """Ingest a single PDF or every PDF in a directory. Returns total sections added.
 
     Pass a .pdf file to ingest just that file, or a directory to ingest every
@@ -323,6 +323,13 @@ async def ingest(path: str | Path) -> int:
     insertion LightRAG uses the LLM to extract entities and relationships from
     each section and merges them into one persistent graph on disk — the graph
     stays global across sections, so cross-section reasoning is preserved.
+
+    `rag` lets a long-lived caller pass its own instance. A CLI run is one
+    process doing one thing, so building an instance and finalizing it here is
+    right; a server is not, and a second instance opened over the same file
+    storage — or a `finalize_storages()` called while another request is
+    mid-query — is how that store gets corrupted. A caller that passes its
+    instance owns its lifecycle: it is not finalized here.
     """
     path = Path(path)
     if path.is_dir():
@@ -334,11 +341,16 @@ async def ingest(path: str | Path) -> int:
     else:
         raise FileNotFoundError(f"Path not found: {path}")
 
-    rag = await build_rag()
+    owned = rag is None
+    rag = rag or await build_rag()
     total = 0
     try:
         for pdf in pdfs:
-            sections = parse_pdf(pdf)
+            # Docling is synchronous and CPU-bound, and parsing a PDF takes long
+            # enough that doing it inline would stall every other coroutine in
+            # the process — including, in a server, the request that just asked
+            # whether the ingest had finished.
+            sections = await asyncio.to_thread(parse_pdf, pdf)
             if not sections:
                 print(f"  {pdf.name}: no text extracted, skipping")
                 continue
@@ -359,7 +371,8 @@ async def ingest(path: str | Path) -> int:
             print(f"  {pdf.name}: {len(sections)} sections")
             total += len(sections)
     finally:
-        await rag.finalize_storages()
+        if owned:
+            await rag.finalize_storages()
     return total
 
 
@@ -370,6 +383,7 @@ async def query(
     mode: str = "mix",
     system_prompt: str | None = None,
     user_prompt: str | None = None,
+    rag: LightRAG | None = None,
 ) -> str:
     """Answer a natural-language question using the graph.
 
@@ -404,8 +418,13 @@ async def query(
     Document List. The answer's `### References` section is written by the model
     from that list, so its presence depends on the prompt, not on a code path —
     see the note above CITE_SOURCES.
+
+    `rag` has the same meaning as in ingest(): pass a long-lived instance and it
+    is used as-is and left open, or pass nothing and one is built and finalized
+    around this call.
     """
-    rag = await build_rag()
+    owned = rag is None
+    rag = rag or await build_rag()
     if system_prompt is None and CITE_SOURCES:
         system_prompt = ANSWER_SYSTEM_PROMPT
     try:
@@ -427,24 +446,29 @@ async def query(
             ),
         )
     finally:
-        await rag.finalize_storages()
+        if owned:
+            await rag.finalize_storages()
 
 
 # --- Remove: drop everything that came from a given PDF ------------------------
 
-async def remove(pdf_name: str) -> str:
+async def remove(pdf_name: str, rag: LightRAG | None = None) -> str:
     """Remove every section ingested from a given PDF. Returns a status message.
 
     Each PDF is ingested as many section-documents (see ingest), so removal
     deletes all of them by their shared "{pdf}#" id prefix (a bare name like
     "AMG.pdf" or a path — only the file name is used).
+
+    `rag` behaves as it does in ingest() and query().
     """
     doc_name = Path(pdf_name).name
-    rag = await build_rag()
+    owned = rag is None
+    rag = rag or await build_rag()
     try:
         count = await _delete_pdf(rag, doc_name)
     finally:
-        await rag.finalize_storages()
+        if owned:
+            await rag.finalize_storages()
     if count == 0:
         return f"no sections found for {doc_name}"
     return f"removed {count} section(s) from {doc_name}"

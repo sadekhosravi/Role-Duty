@@ -30,53 +30,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
 
 from agent import observability
+from agent.conversation import reply_for, should_offer_ticket, ticket_offer
 from agent.graph import run_workflow
-from agent.state import FILER, RESPONDER
 
 PROMPT = "\nyou> "
 QUIT = {"exit", "quit", ":q", "bye"}
 
-
-def ticket_offer(recipient: str) -> str:
-    """The offer, naming who the ticket would go to.
-
-    Naming them is not decoration. "a ticket for the responsible person" is a
-    question the user cannot answer without re-reading the answer, and it reads
-    as boilerplate — which is exactly what it was when this offer went out after
-    every reply, including "Hello".
-    """
-    return (
-        f"Would you like me to file a ticket for the {recipient}? "
-        "Say yes and I will write it to data/tickets/."
-    )
-
-
-def should_offer_ticket(state) -> bool:
-    """Whether to follow this reply with the ticket offer.
-
-    Its own function so the rule can be checked without running a model, and it
-    has needed the checking. Offering unconditionally was wrong in two ways at
-    once: after "Hello" there is nothing to file, and after an answer that
-    could not find a responsible role there is nobody to file it with — the
-    filer would have refused both, so the offer was writing a cheque the rest
-    of the workflow would not honour.
-
-    The condition is now the filer's own precondition, asked before the offer
-    instead of after the yes: is there a situation to report, and did the
-    answer establish who to report it to. The verifier decides that (it has the
-    answer and the evidence in front of it already, so it costs no extra call)
-    and `state.ticket_recipient` is what it decided.
-
-    A failed or ungraded verdict blocks the offer too. An answer we have just
-    warned the user is not fully grounded is not one to raise a ticket from.
-    """
-    return (
-        bool(state.answer)
-        and RESPONDER in state.delegations
-        and FILER not in state.delegations
-        and state.verdict == "pass"
-        and bool(state.ticket_recipient)
-    )
+# Re-exported so the rules stay checkable through this module (check_agent.py
+# loads it by path and asks it what it would offer). They live in
+# agent/conversation.py because the HTTP API applies the same ones, and a rule
+# maintained in two places is a rule maintained in one.
+__all__ = ["reply_for", "should_offer_ticket", "ticket_offer"]
 
 
 async def turn(
@@ -114,10 +78,7 @@ async def turn(
             file=sys.stderr,
         )
 
-    reply = state.answer or "(no answer was produced)"
-
-    if should_offer_ticket(state):
-        reply = f"{reply}\n\n{ticket_offer(state.ticket_recipient)}"
+    reply = reply_for(state)
 
     print(f"\n{reply}")
 

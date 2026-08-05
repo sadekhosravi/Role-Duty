@@ -35,6 +35,10 @@ python scripts/check_agent.py            # the wiring, checked offline
 
 # The ticket MCP server, standalone
 python -m ticket_mcp                     # waits on stdin; Ctrl-C to stop
+
+# The HTTP API (Swagger at /docs, ReDoc at /redoc)
+python scripts/serve.py
+python scripts/serve.py --port 9000 --reload
 ```
 
 There is currently **no test suite, linter, or formatter** configured.
@@ -100,6 +104,43 @@ The conversation lives in `scripts/agent.py`, not in a LangGraph checkpointer.
 so checkpointing it would start turn two with turn one's budget spent. The CLI
 keeps the transcript (questions and replies only) and passes it to
 `run_workflow(history=...)`; the working state starts fresh each turn.
+
+### The HTTP layer
+
+`src/api/` is FastAPI over everything above — see `main.py` for the app and
+`routers/` for one module per resource. It implements no retrieval, no ingestion
+and no agent: each route calls the same function the matching CLI calls, which
+is the only thing keeping the two surfaces from answering differently.
+
+What it *does* own is the difference between a process that runs once and one
+that stays up, and that is where the load-bearing decisions are:
+
+- **One LightRAG per process, and it is the agent's.** `api/stores.py` re-exports
+  `agent.tools._stores`, deliberately. A router that built its own instance would
+  put two LightRAGs over one on-disk store, each finalizing storages the other
+  still had open. This is also why `graph_rag.ingest/query/remove` now take an
+  optional `rag=` — passing one means "used as-is, left open"; passing nothing
+  keeps the build-and-finalize the CLIs rely on.
+- **Writes take `graph_write_lock()`, reads do not.** Two ingests interleaving
+  over one NetworkX graph is not a race the storage layer resolves. Holding the
+  lock across a query, on the other hand, would mean one ingest blocks every
+  question for as long as an LLM takes to read a corpus.
+- **Ingest returns a job, not an answer.** `api/jobs.py` — asyncio tasks in the
+  serving process, bounded and in memory. Read its docstring before reaching for
+  it: no queue, no worker, nothing survives a restart.
+- **The agent is multi-turn and the server keeps the transcript.**
+  `api/sessions.py`, one lock per session. It stores exactly what the CLI stores
+  — questions and the replies as the user saw them, offer included — for the
+  same reason `run_workflow` takes `history` rather than checkpointing.
+- **Blocking calls go to a threadpool.** Chroma, BM25 and Docling are all
+  synchronous; `run_in_threadpool` around them is not optional in an async
+  server. `graph_rag.ingest` offloads `parse_pdf` itself for the same reason.
+- **One worker.** All of that state is per process, so `scripts/serve.py` starts
+  exactly one and says why.
+
+The ticket-offer rule lives in `src/agent/conversation.py` because both the CLI
+and `/agent/chat` apply it. `check_agent.py` still reaches it through
+`scripts/agent.py`, which re-exports it.
 
 ### Known drift to be aware of
 

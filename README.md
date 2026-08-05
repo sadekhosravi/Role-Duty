@@ -57,6 +57,7 @@ Role-Duty/
 │   ├── ingest.py       # PDF -> chunks -> embeddings -> Chroma
 │   ├── query.py        # prompt -> similarity search
 │   ├── agent.py        # a conversation with the agent
+│   ├── serve.py        # the HTTP API (Swagger at /docs)
 │   └── check_agent.py  # the agent's wiring, checked offline
 ├── src/rag/
 │   ├── config.py       # all settings in one place
@@ -64,7 +65,9 @@ Role-Duty/
 │   ├── embeddings.py   # the embedding model (swap it here)
 │   ├── vector_store.py # Chroma wrapper
 │   └── pipeline.py     # ingestion orchestration
+├── src/graph_rag/      # LightRAG graph ingest, query, and BM25 search
 ├── src/agent/          # the LangGraph workflow — see src/agent/graph.py
+├── src/api/            # FastAPI over all of the above — see src/api/main.py
 └── src/ticket_mcp/     # MCP server: writes a ticket as a Word document
 ```
 
@@ -194,6 +197,73 @@ Two constraints are worth knowing, because both were mistakes waiting to happen:
 
 `TICKETS_DIR` moves where tickets are written (default `data/tickets`).
 
+## The HTTP API
+
+Everything above, over HTTP, with a Swagger page to drive it from:
+
+```bash
+python scripts/serve.py            # http://127.0.0.1:8000/docs
+python scripts/serve.py --port 9000 --reload
+```
+
+Nothing in `src/api/` implements retrieval, ingestion or the agent — each route
+calls the same function the matching CLI calls, so the two surfaces cannot
+answer the same question differently.
+
+| Endpoint | What it is |
+| --- | --- |
+| `POST /documents/upload` | Put a PDF in `data/raw` from the browser. Does not ingest. |
+| `GET /documents` | One row per PDF: on disk, in Chroma, in the graph. |
+| `DELETE /documents/{name}` | Drop it from either store, or both. The PDF stays. |
+| `POST /ingest/naive` | PDFs → Chroma. Returns a **job id**. |
+| `POST /ingest/graph` | PDFs → LightRAG graph. Returns a **job id**. The slow, expensive one. |
+| `GET /jobs/{id}` | Poll an ingest until `succeeded` or `failed`. |
+| `POST /query/naive` | Similarity search. Ranked chunks, no LLM, no answer. |
+| `POST /query/graph` | An answer from the graph, with a `### References` section. |
+| `POST /query/keyword` | BM25 over the indexed chunks. Exact terms, no LLM. |
+| `POST /agent/chat` | The whole workflow, as a conversation. |
+| `GET /agent/sessions/{id}` | What a conversation remembers. |
+| `GET /tickets` | What the agent filed, and a download for each. |
+| `GET /health` | Which stores are actually populated. Costs nothing. |
+
+**Ingest returns a job, not an answer.** Parsing a PDF takes a minute and the
+graph ingest has an LLM read every section of it, which is not work that fits
+inside a request. `POST /ingest/graph` answers `202` with a job id; poll
+`GET /jobs/{id}`. Jobs run as asyncio tasks in the serving process — there is no
+queue and no worker, so a restart loses them.
+
+**The agent is multi-turn, and the server holds the transcript.** Omit
+`session_id` on the first call, then send back the one you get:
+
+```bash
+curl -X POST localhost:8000/agent/chat -H 'content-type: application/json' \
+  -d '{"message":"I found a knife in a guest room. What should I do?"}'
+# -> {"session_id":"api-3f90a947", ..., "ticket_offer":"Would you like me to …"}
+
+curl -X POST localhost:8000/agent/chat -H 'content-type: application/json' \
+  -d '{"message":"yes please, file it","session_id":"api-3f90a947"}'
+# -> the ticket, written to data/tickets/
+```
+
+Without the session id the second call has nothing to agree to, and the filer
+has nothing to file. Sessions are in memory and bounded, like the jobs.
+
+**Check `verdict` on the reply.** The workflow returns rejected answers rather
+than nothing — the revision cap ends the loop whether or not the answer got
+better. `pass` means the verifier found it grounded; `fail` means it did not and
+the answer came back anyway; `ungraded` means the verifier never ran. The CLI
+prints a warning at that point, and over HTTP the field is the warning.
+
+**Run one worker.** The job registry, the conversations and the lock that keeps
+two ingests from writing over each other are objects in this process. A second
+worker would give each of them a second copy and the lock would guard nothing.
+`scripts/serve.py` starts one on purpose; scaling past it means moving that
+state out, not adding a flag.
+
+Optional settings, all with working defaults: `API_HOST`, `API_PORT`,
+`API_CORS_ORIGINS` (comma-separated; the middleware is not installed unless you
+set it), `API_MAX_JOBS`, `API_MAX_SESSIONS`, `API_MAX_SESSION_TURNS`.
+
 ## Observability (Langfuse)
 
 The agent traces itself to [Langfuse](https://langfuse.com) — one trace per run,
@@ -267,6 +337,9 @@ Written down rather than hidden, because they are the honest state of it:
 - `src/agent/prompts.py` is the single-node prompt the researcher's and
   responder's prompts were written from. Nothing imports it; it is kept as
   reference material.
+- The API keeps its jobs and its conversations in the serving process, so a
+  restart loses both and a second worker would break the graph write lock. Fine
+  for one node; not a deployment.
 
 ## Where to go next
 
@@ -274,4 +347,7 @@ Written down rather than hidden, because they are the honest state of it:
   once the question names one.
 - Let the responder cite by source *id* rather than by typing the label, so a
   fabricated citation is unrepresentable instead of merely detectable.
-- A small API or UI over `run_workflow`.
+- Stream `/agent/chat` over SSE, so a client can watch the workflow rather than
+  wait on it.
+- Expose the graph itself — nodes, edges, and the subgraph behind an answer —
+  which is what would make the retrieval visible instead of merely cited.
