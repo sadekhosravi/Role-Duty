@@ -134,9 +134,9 @@ none, group your findings by organisation rather than merging them.
   Each tool hands you that string differently, and getting it from the wrong
   place is how a whole answer ends up uncitable:
 
-  - naive_rag_search: the label follows the result number, before the distance.
-Copy it up to the "(distance ...)" and leave that out — it is a similarity
-score, not part of the label.
+  - naive_rag_search: each hit begins with its result number and a distance in
+brackets, and the label is everything after them, to the end of the line. The
+distance is a similarity score and is not part of the label.
   - graph_rag_search: the chunks carry a reference_id, not a label. The labels
 are in the Reference Document List at the END of the result, one per line, each
 prefixed with its id in brackets. Look up every chunk you rely on and copy the

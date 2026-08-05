@@ -137,6 +137,35 @@ def _should_export_span(span: Any) -> bool:
     return _truthy(os.getenv("LANGFUSE_TRACE_OPENAI_SDK"))
 
 
+def _resource_manager(public_key: str) -> Any:
+    """Langfuse's per-key singleton, or None if there isn't one yet.
+
+    Private API, so it is probed rather than relied on: every caller treats a
+    failure here as "cannot tell" and carries on.
+    """
+    try:
+        from langfuse._client.resource_manager import LangfuseResourceManager
+
+        return LangfuseResourceManager._instances.get(public_key)
+    except Exception:  # noqa: BLE001 - diagnostics only, never load-bearing
+        return None
+
+
+def filter_in_force() -> bool | None:
+    """Whether the span filter above is the one actually applied.
+
+    None when tracing is off or the answer cannot be determined. See
+    `_get_client` for why this is worth asking.
+    """
+    public_key = os.getenv("LANGFUSE_PUBLIC_KEY")
+    if not is_enabled() or not public_key:
+        return None
+    manager = _resource_manager(public_key)
+    if manager is None:
+        return None
+    return getattr(manager, "should_export_span", None) is _should_export_span
+
+
 _client: Any = None
 _client_built = False
 
@@ -167,6 +196,23 @@ def _get_client() -> Any:
 
     try:
         from langfuse import Langfuse
+
+        # Langfuse keys its resource manager — which owns the span processor and
+        # the export filter below — by public key, and a constructor that finds
+        # an existing one returns it and DISCARDS every argument passed here.
+        # So whoever builds the client first decides whether the filter exists,
+        # and if something else got there first ours is dropped in silence.
+        # Nothing in this project does that today; LightRAG installs the OpenAI
+        # patch at import but only calls get_client() when a request runs, which
+        # is after this. Said out loud anyway, because a silent no-op is exactly
+        # the failure this codebase keeps having to relearn.
+        if _resource_manager(os.environ["LANGFUSE_PUBLIC_KEY"]) is not None:
+            log.warning(
+                "langfuse: a client for this key already exists, so the span "
+                "filter is not being applied — OpenAI SDK generations will be "
+                "recorded twice and token counts doubled. Build the Langfuse "
+                "client through agent.observability, before anything else."
+            )
 
         _client = Langfuse(
             public_key=os.environ["LANGFUSE_PUBLIC_KEY"],

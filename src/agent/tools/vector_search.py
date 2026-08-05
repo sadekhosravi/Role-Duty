@@ -50,8 +50,15 @@ async def naive_rag_search(question: str, top_k: int = 5) -> str:
     hits = similarity_search(get_collection(), question, n_results=top_k)
     if not hits:
         return "[no vector matches — is the Chroma store ingested?]"
+    # The distance goes BEFORE the label, never after. A label is harvested from
+    # tool output by reading from the filename to the end of the line, so a
+    # trailing "(distance 0.9850)" gets absorbed into it: the same section then
+    # appears under two different labels depending on which tool returned it,
+    # and a citation carrying the score matches the harvested string exactly and
+    # passes the verifier's check. Putting the score in front removes it from
+    # the label without hiding it — the same shape keyword_search already uses.
     return "\n\n".join(
-        f"[{i}] {_label(hit['metadata'])} (distance {hit['distance']:.4f})\n{hit['text']}"
+        f"[{i}] (distance {hit['distance']:.4f}) {_label(hit['metadata'])}\n{hit['text']}"
         for i, hit in enumerate(hits, 1)
     )
 

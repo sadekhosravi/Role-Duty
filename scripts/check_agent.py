@@ -37,6 +37,7 @@ from agent.state import (
     WORKERS,
 )
 from agent.tools import graph_rag_search, keyword_search, naive_rag_search
+from agent.tools import vector_search as vec
 
 PASSED, FAILED = [], []
 
@@ -495,7 +496,19 @@ def check_retrieval_cascade() -> None:
     check(
         "the researcher is told the distance is not part of the label",
         "not part of the label" in flat(res.PROMPT),
-        "the vector tool prints a similarity score after the label",
+    )
+
+    # The label a tool prints has to survive being harvested back out of the
+    # tool output, because that round trip is the whole citation check. A score
+    # printed AFTER the label is absorbed into it: the same section then has two
+    # labels depending on the tool, and a citation carrying the score passes.
+    fake = {"label": "x.pdf › page 3 › Housekeeping Supervisor › Out of Scope:", "source": "x.pdf", "index": 4}
+    line = f"[1] (distance 0.9850) {vec._label(fake)}\nsome chunk text"
+    harvested = ver._known_labels([ToolMessage(line, tool_call_id="1")])
+    check(
+        "a harvested vector label carries no distance",
+        harvested == {fake["label"]},
+        f"harvested: {sorted(harvested)}",
     )
 
 
@@ -774,6 +787,23 @@ def check_observability() -> None:
                 "a configured run gets a callback handler",
                 len(trace.callbacks) == 1,
                 type(trace.callbacks[0]).__name__ if trace.callbacks else "none",
+            )
+        # Declaring the filter is not the same as it being applied: Langfuse
+        # discards the argument when a client for this key already exists, and
+        # says nothing. Asked here, after the client has actually been built.
+        check(
+            "the span filter is the one actually in force",
+            obs.filter_in_force() is not False,
+            "something built the Langfuse client before agent.observability did"
+            if obs.filter_in_force() is False
+            else "declared and applied",
+        )
+        deep = os.getenv("LANGFUSE_TRACE_OPENAI_SDK")
+        if obs._truthy(deep):
+            print(
+                "      note: LANGFUSE_TRACE_OPENAI_SDK is on — LightRAG's internal "
+                "calls are traced, and the agent's own LLM calls are recorded "
+                "twice, so token and cost figures read about double."
             )
     else:
         print("      (traced path not checked — no Langfuse keys configured)")
