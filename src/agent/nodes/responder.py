@@ -171,14 +171,21 @@ full source label. Number them yourself from 1 in the order you first cite them.
 exists in the evidence, and the only correct way to produce one is to find it
 and reproduce it character for character. If you cannot find the label for a
 passage, you may not cite that passage — drop the citation, or drop the claim.
-  - A full label carries a file, a page and a section, in this shape:
+  - A label starts with the file name and is joined by " › ". How many parts
+follow depends on which store the passage came from, and BOTH of these are
+complete labels exactly as they stand:
 
+      <file>.pdf › chunk <n>
       <file>.pdf › page <n> › <Role Title> › <Section>
 
-    That is a description of the parts, not a template to fill in. Writing a
-plausible file name, or defaulting a page to 1, produces a reference that looks
-right and points nowhere. It is a worse failure than omitting the reference,
-because it cannot be spotted without opening the document.
+    Those are descriptions of the parts, not templates to fill in. The first
+shape is what the cheap semantic store produces — it keeps no page or section —
+and most evidence will arrive in it, because that is the tool the researcher
+reaches for first. A short label is not an incomplete one. Never extend it:
+writing a plausible file name, defaulting a page to 1, or adding a section you
+did not read produces a reference that looks right and points nowhere. That is
+a worse failure than omitting the reference, because it cannot be spotted
+without opening the document.
   - Where the label lives depends on the tool. In a graph_rag_search result the
 chunks carry a reference_id and the labels are in the Reference Document List at
 the END of that result — look the id up there and copy the line. In the other

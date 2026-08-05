@@ -24074,3 +24074,92 @@ RuntimeError: C[1/1]: sample_role_duties.pdf#4-chunk-000: JSONDecodeError: Expec
 2026-08-05 00:27:43,362 - lightrag - INFO - Successfully reranked: 20 chunks from 53 original chunks
 2026-08-05 00:27:43,364 - lightrag - INFO - Final context: 65 entities, 103 relations, 20 chunks
 2026-08-05 00:27:43,365 - lightrag - INFO - Final chunks S+F/O: E7/1 E4/5 E10/6 E4/3 E1/4 E2/2 E2/15 E3/14 E5/7 E2/44 E1/38 E1/24 E2/33 E1/10 E2/42 E2/17 E3/36 E1/48 E3/8 E1/18
+2026-08-05 00:55:25,859 - lightrag - INFO - [] Loaded graph from data\graph_rag\graph_chunk_entity_relation.graphml with 1013 nodes, 1170 edges
+2026-08-05 00:55:25,990 - lightrag - INFO - Role LLM Configuration (initialized):
+2026-08-05 00:55:25,990 - lightrag - INFO -  - extract: None/None, host=None, max_async=4, timeout=240
+2026-08-05 00:55:25,991 - lightrag - INFO -  - keyword: None/None, host=None, max_async=4, timeout=240
+2026-08-05 00:55:25,991 - lightrag - INFO -  - query: None/None, host=None, max_async=4, timeout=240
+2026-08-05 00:55:25,991 - lightrag - INFO -  - vlm: None/None, host=None, max_async=4, timeout=240
+2026-08-05 00:55:25,992 - lightrag - INFO - [] Process 6568 KV load full_docs with 167 records
+2026-08-05 00:55:25,994 - lightrag - INFO - [] Process 6568 KV load text_chunks with 167 records
+2026-08-05 00:55:25,995 - lightrag - INFO - [] Process 6568 KV load full_entities with 167 records
+2026-08-05 00:55:25,996 - lightrag - INFO - [] Process 6568 KV load full_relations with 167 records
+2026-08-05 00:55:25,998 - lightrag - INFO - [] Process 6568 KV load entity_chunks with 1013 records
+2026-08-05 00:55:26,000 - lightrag - INFO - [] Process 6568 KV load relation_chunks with 1170 records
+2026-08-05 00:55:26,028 - lightrag - INFO - [] Process 6568 KV load llm_response_cache with 356 records
+2026-08-05 00:55:26,031 - lightrag - INFO - [] Process 6568 doc status load doc_status with 167 records
+2026-08-05 00:55:26,032 - lightrag - INFO - keyword LLM func: 4 new workers initialized (Timeouts: Func: 240s, Worker: 480s, Health Check: 495s)
+2026-08-05 00:55:26,557 - lightrag - INFO -  == LLM cache == saving: hybrid:keywords:6ba03e0a1d4fcc9345d93a939975c107
+2026-08-05 00:55:26,557 - lightrag - INFO - Embedding func: 8 new workers initialized (Timeouts: Func: 30s, Worker: 60s, Health Check: 75s)
+2026-08-05 00:55:27,139 - lightrag - INFO - Query nodes: Shift Supervisor, Customer Experience Team Lead, Store Manager (top_k:40, cosine:0.2)
+2026-08-05 00:55:27,152 - lightrag - INFO - Local query: 40 entites, 199 relations
+2026-08-05 00:55:27,152 - lightrag - INFO - Query edges: reporting lines (top_k:40, cosine:0.2)
+2026-08-05 00:55:27,156 - lightrag - INFO - Global query: 61 entites, 40 relations
+2026-08-05 00:55:27,156 - lightrag - INFO - Raw search results: 92 entities, 221 relations, 0 vector chunks
+2026-08-05 00:55:27,163 - lightrag - INFO - After truncation: 79 entities, 173 relations
+2026-08-05 00:55:27,179 - lightrag - INFO - Selecting 95 from 95 entity-related chunks by vector similarity
+2026-08-05 00:55:27,180 - lightrag - INFO - Find 8 additional chunks in 4 relations (deduplicated 67)
+2026-08-05 00:55:27,182 - lightrag - INFO - Selecting 8 from 8 relation-related chunks by vector similarity
+2026-08-05 00:55:27,182 - lightrag - INFO - Round-robin merged chunks: 103 -> 103 (deduplicated 0)
+2026-08-05 00:55:27,188 - lightrag - INFO - Rerank func: 4 new workers initialized (Timeouts: Func: 30s, Worker: 60s, Health Check: 75s)
+2026-08-05 00:55:28,210 - lightrag - INFO - Successfully reranked: 20 chunks from 103 original chunks
+2026-08-05 00:55:28,212 - lightrag - INFO - Final context: 79 entities, 173 relations, 20 chunks
+2026-08-05 00:55:28,212 - lightrag - INFO - Final chunks S+F/O: E12/1 E5/2 E4/3 E2/7 E10/4 E3/6 E4/5 E2/8 E2/13 E2/9 E4/15 E2/17 E2/12 E2/28 E2/10 E2/14 E1/20 E2/16 E2/21 E4/11
+2026-08-05 00:59:32,280 - lightrag - INFO -  == LLM cache == saving: hybrid:keywords:86ff762694edd32d3cd44feb1bf6e034
+2026-08-05 00:59:32,761 - lightrag - INFO - Query nodes: Customer Experience Team Lead (top_k:40, cosine:0.2)
+2026-08-05 00:59:32,772 - lightrag - INFO - Local query: 40 entites, 121 relations
+2026-08-05 00:59:32,772 - lightrag - INFO - Query edges: reporting line (top_k:40, cosine:0.2)
+2026-08-05 00:59:32,776 - lightrag - INFO - Global query: 58 entites, 40 relations
+2026-08-05 00:59:32,776 - lightrag - INFO - Raw search results: 92 entities, 146 relations, 0 vector chunks
+2026-08-05 00:59:32,783 - lightrag - INFO - After truncation: 89 entities, 146 relations
+2026-08-05 00:59:32,800 - lightrag - INFO - Selecting 86 from 86 entity-related chunks by vector similarity
+2026-08-05 00:59:32,801 - lightrag - INFO - Find 1 additional chunks in 1 relations (deduplicated 55)
+2026-08-05 00:59:32,802 - lightrag - INFO - Selecting 1 from 1 relation-related chunks by vector similarity
+2026-08-05 00:59:32,802 - lightrag - INFO - Round-robin merged chunks: 87 -> 87 (deduplicated 0)
+2026-08-05 00:59:33,709 - lightrag - INFO - Successfully reranked: 20 chunks from 87 original chunks
+2026-08-05 00:59:33,711 - lightrag - INFO - Final context: 89 entities, 146 relations, 20 chunks
+2026-08-05 00:59:33,711 - lightrag - INFO - Final chunks S+F/O: E4/1 E3/2 E8/3 E7/5 E3/13 E2/12 E4/27 E3/4 E2/34 E1/11 E4/6 E2/26 E4/10 E2/32 E1/19 E2/18 E2/42 E11/7 E1/39 E3/20
+2026-08-05 00:59:48,706 - lightrag - INFO - Query nodes: Customer Experience Team Lead (top_k:40, cosine:0.2)
+2026-08-05 00:59:48,716 - lightrag - INFO - Local query: 40 entites, 121 relations
+2026-08-05 00:59:48,716 - lightrag - INFO - Query edges: reporting line (top_k:40, cosine:0.2)
+2026-08-05 00:59:48,720 - lightrag - INFO - Global query: 58 entites, 40 relations
+2026-08-05 00:59:48,720 - lightrag - INFO - Raw search results: 92 entities, 146 relations, 0 vector chunks
+2026-08-05 00:59:48,727 - lightrag - INFO - After truncation: 89 entities, 146 relations
+2026-08-05 00:59:48,746 - lightrag - INFO - Selecting 86 from 86 entity-related chunks by vector similarity
+2026-08-05 00:59:48,746 - lightrag - INFO - Find 1 additional chunks in 1 relations (deduplicated 55)
+2026-08-05 00:59:48,747 - lightrag - INFO - Selecting 1 from 1 relation-related chunks by vector similarity
+2026-08-05 00:59:48,747 - lightrag - INFO - Round-robin merged chunks: 87 -> 87 (deduplicated 0)
+2026-08-05 00:59:49,134 - lightrag - INFO - Successfully reranked: 20 chunks from 87 original chunks
+2026-08-05 00:59:49,135 - lightrag - INFO - Final context: 89 entities, 146 relations, 20 chunks
+2026-08-05 00:59:49,135 - lightrag - INFO - Final chunks S+F/O: E4/1 E3/2 E8/3 E7/5 E3/13 E2/12 E4/27 E3/4 E2/34 E1/11 E4/6 E2/26 E4/10 E2/32 E1/19 E2/18 E2/42 E11/7 E1/39 E3/20
+2026-08-05 01:28:15,931 - lightrag - INFO - [] Loaded graph from data\graph_rag\graph_chunk_entity_relation.graphml with 1013 nodes, 1170 edges
+2026-08-05 01:28:16,168 - lightrag - INFO - Role LLM Configuration (initialized):
+2026-08-05 01:28:16,168 - lightrag - INFO -  - extract: None/None, host=None, max_async=4, timeout=240
+2026-08-05 01:28:16,168 - lightrag - INFO -  - keyword: None/None, host=None, max_async=4, timeout=240
+2026-08-05 01:28:16,169 - lightrag - INFO -  - query: None/None, host=None, max_async=4, timeout=240
+2026-08-05 01:28:16,169 - lightrag - INFO -  - vlm: None/None, host=None, max_async=4, timeout=240
+2026-08-05 01:28:16,172 - lightrag - INFO - [] Process 23944 KV load full_docs with 167 records
+2026-08-05 01:28:16,176 - lightrag - INFO - [] Process 23944 KV load text_chunks with 167 records
+2026-08-05 01:28:16,179 - lightrag - INFO - [] Process 23944 KV load full_entities with 167 records
+2026-08-05 01:28:16,182 - lightrag - INFO - [] Process 23944 KV load full_relations with 167 records
+2026-08-05 01:28:16,186 - lightrag - INFO - [] Process 23944 KV load entity_chunks with 1013 records
+2026-08-05 01:28:16,189 - lightrag - INFO - [] Process 23944 KV load relation_chunks with 1170 records
+2026-08-05 01:28:16,267 - lightrag - INFO - [] Process 23944 KV load llm_response_cache with 358 records
+2026-08-05 01:28:16,270 - lightrag - INFO - [] Process 23944 doc status load doc_status with 167 records
+2026-08-05 01:28:16,273 - lightrag - INFO - keyword LLM func: 4 new workers initialized (Timeouts: Func: 240s, Worker: 480s, Health Check: 495s)
+2026-08-05 01:28:16,824 - lightrag - INFO -  == LLM cache == saving: hybrid:keywords:c97e75fdfe97fae6e7440fcc25267d66
+2026-08-05 01:28:16,825 - lightrag - INFO - Embedding func: 8 new workers initialized (Timeouts: Func: 30s, Worker: 60s, Health Check: 75s)
+2026-08-05 01:28:17,410 - lightrag - INFO - Query nodes: Duty Manager, Front of House (top_k:40, cosine:0.2)
+2026-08-05 01:28:17,436 - lightrag - INFO - Local query: 40 entites, 247 relations
+2026-08-05 01:28:17,436 - lightrag - INFO - Query edges: reporting structure, job role (top_k:40, cosine:0.2)
+2026-08-05 01:28:17,444 - lightrag - INFO - Global query: 56 entites, 40 relations
+2026-08-05 01:28:17,445 - lightrag - INFO - Raw search results: 83 entities, 273 relations, 0 vector chunks
+2026-08-05 01:28:17,461 - lightrag - INFO - After truncation: 66 entities, 166 relations
+2026-08-05 01:28:17,495 - lightrag - INFO - Selecting 95 from 95 entity-related chunks by vector similarity
+2026-08-05 01:28:17,497 - lightrag - INFO - Find 5 additional chunks in 3 relations (deduplicated 71)
+2026-08-05 01:28:17,499 - lightrag - INFO - Selecting 5 from 5 relation-related chunks by vector similarity
+2026-08-05 01:28:17,499 - lightrag - INFO - Round-robin merged chunks: 100 -> 100 (deduplicated 0)
+2026-08-05 01:28:17,511 - lightrag - INFO - Rerank func: 4 new workers initialized (Timeouts: Func: 30s, Worker: 60s, Health Check: 75s)
+2026-08-05 01:28:17,886 - lightrag - INFO - Successfully reranked: 20 chunks from 100 original chunks
+2026-08-05 01:28:17,889 - lightrag - INFO - Final context: 66 entities, 166 relations, 20 chunks
+2026-08-05 01:28:17,889 - lightrag - INFO - Final chunks S+F/O: E3/1 E3/4 E4/8 E4/9 E3/6 E3/3 E4/12 E4/13 E2/2 E2/25 E3/22 E2/19 E2/7 E3/10 E2/27 E2/39 E1/28 E2/5 E1/47 E2/54

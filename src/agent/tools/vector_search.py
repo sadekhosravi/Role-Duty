@@ -34,10 +34,18 @@ class VectorSearchInput(BaseModel):
 async def naive_rag_search(question: str, top_k: int = 5) -> str:
     """Plain semantic search over document chunks (no graph, no reranking).
 
-    Returns the chunks whose embeddings are closest to the question, each with
-    its source file and a distance (lower is closer). Useful as an independent
-    check on the graph — it can surface a passage the graph never connected —
-    and for questions answered by one self-contained piece of text.
+    The cheapest and fastest retriever, and the one to try FIRST. It makes no
+    model calls of its own: it embeds the question and returns the chunks whose
+    embeddings are closest, each with its source file and a distance (lower is
+    closer). For any question that one self-contained passage answers, this is
+    also the last tool you need.
+
+    Its labels stop at the chunk index — this store keeps no page or section —
+    so copy what it gives you and do not complete it from memory.
+
+    Escalate to graph_rag_search only when this did not settle the question:
+    nothing relevant came back, or the answer needs a connection between roles
+    that no single passage states.
     """
     hits = similarity_search(get_collection(), question, n_results=top_k)
     if not hits:

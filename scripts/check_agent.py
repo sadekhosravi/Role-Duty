@@ -36,7 +36,7 @@ from agent.state import (
     RESPONDER,
     WORKERS,
 )
-from agent.tools import graph_rag_search, keyword_search
+from agent.tools import graph_rag_search, keyword_search, naive_rag_search
 
 PASSED, FAILED = [], []
 
@@ -427,6 +427,72 @@ def check_tool_arguments() -> None:
 # -------------------------------------------------------------- behavioural
 
 
+def check_retrieval_cascade() -> None:
+    """Cheap retrieval first, graph only as escalation.
+
+    Three places have to agree or the cascade does not happen: the order the
+    tools are declared in (which is the order the model sees them), the policy
+    in the researcher's prompt, and the tools' own descriptions — a tool that
+    describes itself as the strongest option will be reached for first no matter
+    what the prompt above it says.
+    """
+    print("\nRetrieval cascade (cheap first, graph on escalation)")
+    names = [tool.name for tool in WORKFLOW.by_name["researcher"].tools]
+    check(
+        "the cheap retriever is declared first",
+        names[0] == "naive_rag_search",
+        f"declared order: {names}",
+    )
+    check(
+        "the graph is declared after it",
+        names.index("graph_rag_search") > names.index("naive_rag_search"),
+    )
+    check(
+        "the prompt opens on the cheap retriever",
+        "ALWAYS start with naive_rag_search" in flat(res.PROMPT),
+    )
+    check(
+        "the graph is named as the escalation, not the opening move",
+        "escalate to graph_rag_search" in flat(res.PROMPT),
+    )
+    check(
+        "confirming an answer it already has is called out as the expensive mistake",
+        "Do not escalate out of thoroughness" in flat(res.PROMPT),
+        "an unnecessary graph call is several model calls",
+    )
+
+    # The tool docstrings are what the model receives as the tool description,
+    # so they are part of the policy whether or not they are meant to be.
+    check(
+        "the cheap tool describes itself as first",
+        "try FIRST" in flat(naive_rag_search.description),
+    )
+    check(
+        "the graph tool describes itself as escalation",
+        "ESCALATION tool, not the opening move" in flat(graph_rag_search.description),
+    )
+    check(
+        "the graph tool no longer sends failures back to the cheap tool",
+        "use keyword_search instead" in flat(graph_rag_search.description),
+        "naive already ran, so retrying it is the one thing that cannot help",
+    )
+
+    # Cheap-first means most labels now come from the store that keeps no page
+    # or section. Both writers have to accept a short label, or the run ends in
+    # the failure this project has already paid for twice: invented pages.
+    for label, prompt in (("researcher", res.PROMPT), ("responder", resp.PROMPT)):
+        check(
+            f"the {label} is told a short label is complete",
+            "chunk <n>" in flat(prompt) or "› chunk 7" in flat(prompt),
+            "the cheap store keeps no page or section",
+        )
+    check(
+        "the responder is told never to extend one",
+        "Never extend it" in flat(resp.PROMPT),
+        "adding a plausible page is the fabrication this guards",
+    )
+
+
 def check_researcher() -> None:
     print("\nResearcher")
     check("it has all three retrievers", len(WORKFLOW.by_name["researcher"].tools) == 3)
@@ -659,10 +725,34 @@ def check_observability() -> None:
 
     # The untraced path has to yield a usable object, not None — every caller
     # reads .callbacks off it unconditionally.
-    with obs.trace_run("question") as trace:
-        check("an untraced run still yields a handle", trace.callbacks == [])
-        check("recording an untraced run is a no-op", trace.record(AgentState()) is None)
-        check("an untraced run has no URL", trace.url is None)
+    #
+    # Tracing is forced off here rather than assumed off. It was assumed once,
+    # and the check passed until the day real keys landed in .env — at which
+    # point it started failing on a machine where nothing was wrong. A check
+    # that only holds in one configuration is testing the configuration.
+    saved_client, saved_built = obs._client, obs._client_built
+    os.environ["LANGFUSE_TRACING_ENABLED"] = "false"
+    obs._client, obs._client_built = None, False
+    try:
+        with obs.trace_run("question") as trace:
+            check("an untraced run still yields a handle", trace.callbacks == [])
+            check("recording an untraced run is a no-op", trace.record(AgentState()) is None)
+            check("an untraced run has no URL", trace.url is None)
+    finally:
+        os.environ.pop("LANGFUSE_TRACING_ENABLED", None)
+        obs._client, obs._client_built = saved_client, saved_built
+
+    # And the traced path, when this machine is set up for it. Skipped rather
+    # than failed otherwise: not having Langfuse configured is a valid state.
+    if obs.is_enabled():
+        with obs.trace_run("question", tags=["check"]) as trace:
+            check(
+                "a configured run gets a callback handler",
+                len(trace.callbacks) == 1,
+                type(trace.callbacks[0]).__name__ if trace.callbacks else "none",
+            )
+    else:
+        print("      (traced path not checked — no Langfuse keys configured)")
 
     # The export filter, checked against stand-ins rather than live spans: the
     # only thing it reads is the span name, and building a real ReadableSpan
@@ -728,6 +818,7 @@ def main() -> None:
     check_tool_boundaries()
     check_routers()
     check_orchestrator()
+    check_retrieval_cascade()
     check_researcher()
     check_responder()
     check_verifier()

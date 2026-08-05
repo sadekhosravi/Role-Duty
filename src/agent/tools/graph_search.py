@@ -43,15 +43,20 @@ class GraphSearchInput(BaseModel):
 async def graph_rag_search(question: str, mode: GraphMode = "hybrid") -> str:
     """Search the knowledge graph of roles, duties and reporting lines.
 
+    The ESCALATION tool, not the opening move. It runs its own model calls to
+    match entities and rank relationships, which makes it far slower and far
+    more expensive than naive_rag_search — try that first, and come here only
+    when it did not settle the question.
+
     Graph retrieval only — no vector search. Returns the matched entities, the
     relationships connecting them (the multi-hop paths), and the source chunks
-    behind them with their citation labels. Best for questions about how roles
-    relate: who reports to whom, where something escalates, what a role may not
-    do, and anything that needs following a chain across sections or documents.
+    behind them with their citation labels. It is the only tool that returns
+    relationships, so it is the one that answers how roles relate: who reports
+    to whom, where something escalates, what a role may not do, and anything
+    that needs following a chain across sections or documents.
 
     If this returns nothing useful, the question's roles were not matched in the
-    graph. Do not retry it with the same wording — use naive_rag_search or
-    keyword_search instead.
+    graph. Do not retry it with the same wording — use keyword_search instead.
     """
     # No manual clamp on `mode`: the Literal reaches the model as a JSON-schema
     # enum, and anything outside it is rejected before this function runs, with
