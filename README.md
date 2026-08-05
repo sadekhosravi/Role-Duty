@@ -1,18 +1,49 @@
-# Role-Duty — Simple RAG Pipeline
+# Role-Duty — an agentic RAG system over role and duty documents
 
-A minimal Retrieval-Augmented Generation (RAG) ingestion pipeline built on
-[Docling](https://github.com/docling-project/docling) (PDF extraction) and
-[Chroma](https://www.trychroma.com/) (vector database).
+Ask who is responsible for something, get a cited answer, and — when the answer
+establishes someone to raise the matter with — have a ticket filed for them as a
+Word document.
 
-It does four things:
+The corpus is a set of role and duty reference guides for several unrelated
+organisations (a hotel, a hospital, an airport, a data centre, a museum, a
+police department, a school, a shop). The questions that matter about documents
+like these are rarely lookups. They are *"a housekeeper found a knife — who does
+that go to, and does it stop there?"*, which turns on an escalation chain, on
+what a role is explicitly **not** allowed to do, and on not confusing two
+organisations that both have a "Duty Manager".
 
-1. **Extract** text from PDFs (Docling).
-2. **Embed** the text with a pluggable embedding model.
-3. **Store** the vectors in a persistent Chroma collection.
-4. **Query** with a prompt and run a similarity search.
+Built on [LangGraph](https://github.com/langchain-ai/langgraph), with three
+retrievers over the same corpus, an evaluator loop, MCP for the one action that
+writes to disk, and Langfuse for tracing.
 
-This is deliberately small — a foundation to build a more advanced RAG
-system on, one step at a time.
+```
+START ─> orchestrator ─> researcher ─> back to orchestrator
+                      ─> filer ─> END
+                      ─> responder ─> verifier ─> END
+                                               ─> back to orchestrator
+```
+
+**Retrieval, cheapest first.** `naive_rag_search` (Chroma similarity, no model
+calls) runs first and is often enough. Only when it does not settle the
+question does the researcher escalate to `graph_rag_search`
+([LightRAG](https://github.com/HKUDS/LightRAG) — the only retriever that returns
+*relationships*, and the expensive one). `keyword_search` (BM25) confirms exact
+titles and thresholds that embeddings blur.
+
+**Grounding is checked, not requested.** The responder cannot retrieve, so the
+verifier grades its claims against the same evidence the responder had. Citation
+labels are validated by string comparison against what the tools actually
+returned — prompting for correct citations failed twice, first by inventing
+plausible labels with shifted page numbers, then by stripping the file and page
+instead of copying them. String comparison is not persuadable.
+
+**Every loop is bounded.** Delegations, revisions and retrievals each have a cap,
+because a disagreement between two nodes otherwise runs until the recursion limit
+kills the request and returns nothing at all.
+
+> Built as a learning project, one step at a time. Most comments in the code
+> explain *why* something is the way it is, usually because the obvious
+> alternative was tried first and broke.
 
 ## Project structure
 
@@ -39,31 +70,54 @@ Role-Duty/
 
 ## Setup
 
+Python 3.14. [uv](https://docs.astral.sh/uv/) is the supported path:
+
+```bash
+uv sync
+cp .env.example .env          # then put your OpenRouter key in it
+```
+
+Or with a plain venv:
+
 ```bash
 python -m venv .venv
 .venv\Scripts\activate        # Windows
 # source .venv/bin/activate   # macOS / Linux
-
 pip install -r requirements.txt
-cp .env.example .env          # then edit if you want to change defaults
+cp .env.example .env
 ```
+
+You need an [OpenRouter](https://openrouter.ai/keys) key — it is used for both
+the chat model and the embeddings. Everything else in `.env.example` has a
+working default.
 
 ## Usage
 
 1. Put one or more PDFs in `data/raw/`.
 
-2. Ingest them:
+2. Ingest them — twice, once into each store:
 
    ```bash
-   python scripts/ingest.py                  # all PDFs in data/raw
-   python scripts/ingest.py data/raw/mydoc.pdf
+   python scripts/ingest.py                       # -> Chroma (naive RAG)
+   python src/graph_rag/graph_rag.py ingest data/raw   # -> LightRAG graph
    ```
 
-3. Query them:
+3. Ask it something:
 
    ```bash
-   python scripts/query.py "What is the refund policy?"
+   python scripts/agent.py "Who authorises a refund above the threshold?"
+   ```
+
+   Or search the vector store directly, with no agent and no LLM:
+
+   ```bash
    python scripts/query.py "What is the refund policy?" --top-k 3
+   ```
+
+4. Check the wiring at any point. ~150 assertions, offline, no API key needed:
+
+   ```bash
+   python scripts/check_agent.py
    ```
 
 ## Talking to the agent
@@ -189,21 +243,35 @@ Other settings, all optional:
 
 All of this lives in `src/agent/observability.py`; no node knows about it.
 
-## Choosing / changing the embedding model
+## Changing the embedding model
 
-The embedding model is decoupled on purpose. Set `EMBEDDING_MODEL` in `.env`
-to any [sentence-transformers](https://www.sbert.net/docs/pretrained_models.html)
-model name. To use a completely different provider (OpenAI, Cohere, a local
-model), edit the single function in `src/rag/embeddings.py`.
+`src/rag/embeddings.py` is the single place text becomes vectors. It uses
+Chroma's `OpenAIEmbeddingFunction` pointed at OpenRouter, so `EMBEDDING_MODEL`
+in `.env` picks the model; replace that one function to change provider.
 
-> Note: after changing the embedding model, re-ingest your PDFs — vectors from
-> different models are not comparable.
+> After changing it, **re-ingest everything**. Vectors from different models are
+> not comparable, and the persisted store in `data/chroma/` still holds the old
+> ones.
+
+## Known rough edges
+
+Written down rather than hidden, because they are the honest state of it:
+
+- `scripts/check_agent.py` has one expected failure — four
+  `Hospitalist (Internal Medicine)` chunks in the graph store carry no file
+  prefix, so they cannot be cited. An ingest-side bug, not a retrieval one.
+- The corpus holds eight organisations and a search routinely returns sections
+  from several. The prompts work hard to keep them apart; a question naming an
+  organisation the corpus also documents can still burn most of the delegation
+  budget on the wrong one.
+- `src/agent/prompts.py` is the single-node prompt the researcher's and
+  responder's prompts were written from. Nothing imports it; it is kept as
+  reference material.
 
 ## Where to go next
 
-Good next steps as you expand this:
-
-- Add an LLM step to generate answers from the retrieved chunks.
-- Tune chunking (size / overlap) in `extractor.py`.
-- Store richer metadata (page numbers, section headings) for better citations.
-- Add a small API or UI on top of `query.py`.
+- Cut the cost of cross-organisation questions — filter retrieval by document
+  once the question names one.
+- Let the responder cite by source *id* rather than by typing the label, so a
+  fabricated citation is unrepresentable instead of merely detectable.
+- A small API or UI over `run_workflow`.

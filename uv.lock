@@ -2803,6 +2803,19 @@ wheels = [
 ]
 
 [[package]]
+name = "reportlab"
+version = "5.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "charset-normalizer" },
+    { name = "pillow" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/41/d6/4b7b0cf56880eb96533e607967be6a939e344675601e033d113a0bfa1f4e/reportlab-5.0.0.tar.gz", hash = "sha256:e4494a0c6623ae213bb856fba523171b2b54a7bf629fda02d5e525a7b899a784", size = 3701928, upload-time = "2026-06-18T11:34:31.145Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a3/07/70085c17a369605f15e301d10ab902115019b1126c7253d964afc230c7d6/reportlab-5.0.0-py3-none-any.whl", hash = "sha256:9d5a3affa84919e1111ede580031266a570e93b1ce388219621347965ff1d93c", size = 1956710, upload-time = "2026-06-18T11:34:29.07Z" },
+]
+
+[[package]]
 name = "requests"
 version = "2.34.2"
 source = { registry = "https://pypi.org/simple" }
@@ -2871,7 +2884,9 @@ dependencies = [
     { name = "mcp" },
     { name = "openai" },
     { name = "python-docx" },
+    { name = "python-dotenv" },
     { name = "rank-bm25" },
+    { name = "reportlab" },
 ]
 
 [package.metadata]
@@ -2887,7 +2902,9 @@ requires-dist = [
     { name = "mcp", specifier = ">=1.9,<2" },
     { name = "openai", specifier = ">=2.46.0" },
     { name = "python-docx", specifier = ">=1.2" },
+    { name = "python-dotenv", specifier = ">=1.2.2" },
     { name = "rank-bm25", specifier = ">=0.2.2" },
+    { name = "reportlab", specifier = ">=5.0.0" },
 ]
 
 [[package]]

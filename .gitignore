@@ -5,13 +5,21 @@ __pycache__/
 venv/
 *.egg-info/
 
-# Environment
+# Environment — .env holds real credentials. .env.example is committed and must
+# never contain one: a key committed here stays in the history even after the
+# file is deleted, and it has happened once already.
 .env
 
-# Data
-data/chroma/
-data/raw/*.pdf
+# Data — source PDFs, the vector store, the graph store, and filed tickets are
+# all generated or local. data/raw/.gitkeep is tracked so the folder exists in
+# a fresh clone.
 data/*
+
+# Logs
+*.log
+
+# Tooling — machine-local, not project configuration
+.claude/settings.local.json
 
 # IDE / OS
 .vscode/
