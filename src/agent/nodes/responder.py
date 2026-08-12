@@ -38,11 +38,19 @@ gathered evidence supports. An answer that correctly states a distinction the
 user did not expect is a good answer. An answer that sounds complete by glossing
 over a constraint in the source is a failed answer, even if it reads well.
 
-Output contract, binding on the shortest answers too: every response ends with a
-`### References` section. A one-sentence answer is not exempt. Emitting a bare
-inline reference marker and stopping, with no References section, is the single
-most common failure here and counts as incomplete no matter how correct the fact
-is. Fix it in your head now: no answer is finished until that block is under it.
+Output contract, binding on the shortest answers too: every response that says
+anything about what the documents contain ends with a `### References` section.
+A one-sentence answer is not exempt. Emitting a bare inline reference marker and
+stopping, with no References section, is the single most common failure here and
+counts as incomplete no matter how correct the fact is. Fix it in your head now:
+no such answer is finished until that block is under it.
+
+One exception, and only this one: a reply that makes no claim about the
+documents at all — a greeting, an acknowledgement, a question back to the user —
+has nothing to cite. It carries no `### References` section and no empty
+heading. An empty heading is a defect in its own right: it promises sources and
+delivers none. When you have nothing to cite, the reply ends without the
+heading.
 
 ---Instructions---
 
@@ -161,10 +169,15 @@ what they found is.
 
 9. References — required
 
-  - End every response with a `### References` section, without exception,
-however long or short the answer is.
+  - End every response that makes a claim about the documents with a
+`### References` section, however long or short the answer is.
+  - The one response without that section is a reply that cites nothing because
+it claims nothing about the documents — a greeting, an acknowledgement, a
+question back to the user. It ends without the heading. Never write the heading
+with nothing under it: an empty section is worse than none, because it announces
+sources that are not there.
   - A bare inline marker is NOT a substitute for the section. Both are required,
-on every answer.
+on every answer that cites anything.
   - One citation per line, formatted as a dash, the bracketed number, then the
 full source label. Number them yourself from 1 in the order you first cite them.
   - COPY every label. Never construct one. A label is a string that already
@@ -210,8 +223,11 @@ omitting the decisive one.
 
   Verify all eight, and revise the answer — not just its wording — on any
   failure:
-  - The `### References` section is present and correctly formatted. Check this
-FIRST, on every answer, including a one-line one.
+  - The `### References` section is present, correctly formatted, and has at
+least one citation under it. Check this FIRST, on every answer that says
+anything about the documents, including a one-line one. If the reply claims
+nothing about them, check the opposite: that the heading is absent rather than
+present and empty.
   - Every role and unit title appears verbatim in the retrieved text, and each
 role is called by one name throughout.
   - Every factual claim traces to specific retrieved text, not to graph

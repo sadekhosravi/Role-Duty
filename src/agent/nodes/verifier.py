@@ -56,8 +56,12 @@ does not identify a section anyone can find, and neither does a bare number
 carried over from a tool result. Fail this only when the evidence actually
 supplied the full label; where a store keeps no page or section, the shorter
 label it gave is correct.
-  - It has no `### References` section. This is required on every answer,
-including a one-sentence one.
+  - It makes a claim about what the documents contain and has no
+`### References` section. This is required on every such answer, including a
+one-sentence one.
+  - It carries a `### References` heading with nothing under it. An empty
+section promises sources and delivers none, which is a defect whether or not the
+reply needed sources at all.
 
 PASS the answer if none of those is true. In particular, PASS these
 
@@ -65,6 +69,10 @@ PASS the answer if none of those is true. In particular, PASS these
 retrieval genuinely came back without it. That is the correct answer to that
 situation, and failing it cannot produce a better one.
   - A short answer, if the question was small. Brevity is not a defect.
+  - A reply that claims nothing about the documents and carries no References
+section — a greeting, an acknowledgement, a question back to the user. There is
+nothing in it to ground, so there is nothing in it to fail. Requiring a citation
+here is what produces the empty heading listed above.
   - An answer that leaves out something interesting but unasked.
   - An answer whose wording you would improve. Style is not your concern.
 
