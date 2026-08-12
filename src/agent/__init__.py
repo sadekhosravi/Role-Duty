@@ -1,13 +1,12 @@
 """Agentic RAG: an orchestrator delegating to specialist nodes.
 
-    nodes/      one file per node — its prompt, its body, its tools, its spec
-    tools/      one file per tool — graph, vector, keyword, and the MCP ticket
-    graph.py    the wiring: who hands to whom, and where the loops stop
-    state.py    what flows between nodes, and the node-name vocabulary
-    spec.py     how a node is declared
-    llm.py      the chat model
-    prompts.py  RAG_SYSTEM_PROMPT, from the single-node version — the source
-                the researcher's and responder's prompts get written from
+    nodes/          one file per node — its prompt, its body, its tools, its spec
+    tools/          one per tool — sections, graph, and the MCP ticket writer
+    conversation.py what a caller does with a finished run
+    graph.py        the wiring: who hands to whom, and where the loop stops
+    state.py        what flows between nodes, and the routing vocabulary
+    spec.py         how a node is declared
+    llm.py          the chat model
 
 See graph.py for the overview. All five nodes are implemented: the run gathers
 evidence, writes an answer, grades it, and — when the user asks — files a ticket

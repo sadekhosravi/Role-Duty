@@ -34,7 +34,7 @@ from agent.tools import _stores
 
 # Re-exported under their own names so the routers read as if these were ours,
 # and so a future move to a real store registry is one edit in one file.
-get_collection = _stores.get_collection
+get_heading_collection = _stores.get_heading_collection
 get_rag = _stores.get_rag
 
 _graph_write_lock = asyncio.Lock()

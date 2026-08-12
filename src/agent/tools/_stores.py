@@ -5,19 +5,24 @@ Chroma spins up a client — and a node may call several tools, several times, i
 one run. Opening them per call would pay that cost every time, so each is built
 on first use and reused for the life of the process.
 
-They live here rather than in a tool module because two tools need them and
-neither owns them: graph_search and keyword_search both read the LightRAG store
-(keyword_search reads its persisted chunk file directly, so it needs no handle),
-and vector_search needs the Chroma collection.
+They live here rather than in a tool module because more than one caller needs
+them and none owns them: graph_search reads the LightRAG store, section_search
+reads the heading index, and the HTTP API re-exports both so that a request and
+an agent run are the same read of the same files (see api/stores.py).
+
+The document trees themselves are not here. They are plain JSON and their cache
+lives in doctree.store, which is where the ingest that invalidates it can reach
+it — a handle held here would have to be invalidated from a package that does
+not import this one.
 """
 
 from __future__ import annotations
 
+from doctree.index import get_heading_collection as _open_headings
 from graph_rag.graph_rag import build_rag
-from rag.vector_store import get_collection as _open_collection
 
 _rag = None
-_collection = None
+_headings = None
 
 
 async def get_rag():
@@ -28,9 +33,9 @@ async def get_rag():
     return _rag
 
 
-def get_collection():
-    """The shared Chroma collection, opened on first use."""
-    global _collection
-    if _collection is None:
-        _collection = _open_collection()
-    return _collection
+def get_heading_collection():
+    """The shared Chroma collection of section headings, opened on first use."""
+    global _headings
+    if _headings is None:
+        _headings = _open_headings()
+    return _headings

@@ -40,8 +40,7 @@ from agent.state import (
     ROUTES,
     WORKERS,
 )
-from agent.tools import graph_rag_search, keyword_search, naive_rag_search
-from agent.tools import vector_search as vec
+from agent.tools import find_section, graph_rag_search, read_section
 from agent.tools.tickets import CREATE_TICKET, ticket_tools
 from agent.tools.tickets import load_tools as ticket_load_tools
 
@@ -149,8 +148,9 @@ def check_tool_boundaries() -> None:
     print("\nPer-node tool access")
     by_name = WORKFLOW.by_name
     check(
-        "researcher has all three retrievers",
-        len(by_name["researcher"].tools) == 3,
+        "the researcher has find, read and the graph",
+        [tool.name for tool in by_name["researcher"].tools]
+        == ["find_section", "read_section", "graph_rag_search"],
     )
     check(
         "the filer has the MCP ticket tool",
@@ -159,7 +159,7 @@ def check_tool_boundaries() -> None:
     )
     check(
         "the filer cannot retrieve",
-        not ({"graph_rag_search", "naive_rag_search", "keyword_search"}
+        not ({"graph_rag_search", "find_section", "read_section"}
              & {tool.name for tool in by_name[FILER].tools}),
         "it fills the ticket from the conversation, not from a fresh search",
     )
@@ -541,7 +541,7 @@ def check_declarations() -> None:
             "the same tool listed twice",
             lambda: NodeSpec(
                 name="x", system_prompt="x", runner=orch.run,
-                tools=[keyword_search, keyword_search],
+                tools=[find_section, find_section],
             ),
         ),
         (
@@ -565,10 +565,11 @@ def check_tool_arguments() -> None:
     print("\nTool arguments that should be refused")
     for label, tool, args in [
         ("a graph mode that would smuggle in vector search", graph_rag_search, {"question": "q", "mode": "mix"}),
-        ("top_k below the floor", keyword_search, {"question": "q", "top_k": 0}),
-        ("top_k above the ceiling", keyword_search, {"question": "q", "top_k": 99}),
-        ("an empty question", keyword_search, {"question": "", "top_k": 3}),
-        ("an argument the tool does not have", keyword_search, {"question": "q", "limit": 3}),
+        ("top_k below the floor", find_section, {"question": "q", "top_k": 0}),
+        ("top_k above the ceiling", find_section, {"question": "q", "top_k": 99}),
+        ("an empty question", find_section, {"question": "", "top_k": 3}),
+        ("an argument the tool does not have", find_section, {"question": "q", "limit": 3}),
+        ("a read with no id at all", read_section, {"section_id": ""}),
     ]:
         refused, _ = rejects(lambda: asyncio.run(tool.ainvoke(args)))
         check(label, refused)
@@ -578,28 +579,43 @@ def check_tool_arguments() -> None:
 
 
 def check_retrieval_cascade() -> None:
-    """Cheap retrieval first, graph only as escalation.
+    """Find, read, then escalate — and the three places that must agree on it.
 
-    Three places have to agree or the cascade does not happen: the order the
-    tools are declared in (which is the order the model sees them), the policy
-    in the researcher's prompt, and the tools' own descriptions — a tool that
-    describes itself as the strongest option will be reached for first no matter
-    what the prompt above it says.
+    The order the tools are declared in (which is the order the model sees
+    them), the policy in the researcher's prompt, and the tools' own
+    descriptions. A tool that describes itself as the strongest option will be
+    reached for first no matter what the prompt above it says.
     """
-    print("\nRetrieval cascade (cheap first, graph on escalation)")
+    print("\nRetrieval cascade (find, read, graph on escalation)")
     names = [tool.name for tool in WORKFLOW.by_name["researcher"].tools]
     check(
-        "the cheap retriever is declared first",
-        names[0] == "naive_rag_search",
+        "the shortlist tool is declared first",
+        names[0] == "find_section",
         f"declared order: {names}",
     )
     check(
-        "the graph is declared after it",
-        names.index("graph_rag_search") > names.index("naive_rag_search"),
+        "reading comes before the graph",
+        names.index("read_section") < names.index("graph_rag_search"),
     )
     check(
-        "the prompt opens on the cheap retriever",
-        "ALWAYS start with naive_rag_search" in flat(res.PROMPT),
+        "exact-term matching is not a tool that can be skipped",
+        "keyword_search" not in names,
+        "it runs inside find_section on every call — see doctree/search.py",
+    )
+    check(
+        "the prompt opens on the shortlist tool",
+        "ALWAYS start with find_section" in flat(res.PROMPT),
+    )
+    check(
+        "the prompt says a preview is not evidence",
+        "The preview is NOT evidence" in flat(res.PROMPT)
+        and "citing a preview" in flat(res.PROMPT),
+        "the one failure this split introduces: answering off the shortlist",
+    )
+    check(
+        "the prompt says to read the role, not just the sub-section",
+        "Read the ROLE, not just the sub-section" in flat(res.PROMPT),
+        "exclusions mean something different next to the duties they carve out",
     )
     check(
         "the graph is named as the escalation, not the opening move",
@@ -614,23 +630,37 @@ def check_retrieval_cascade() -> None:
     # The tool docstrings are what the model receives as the tool description,
     # so they are part of the policy whether or not they are meant to be.
     check(
-        "the cheap tool describes itself as first",
-        "try FIRST" in flat(naive_rag_search.description),
+        "the shortlist tool describes itself as first",
+        "START HERE" in flat(find_section.description),
+    )
+    check(
+        "the shortlist tool refuses to be treated as evidence",
+        "Do not answer or cite from the preview" in flat(find_section.description),
+    )
+    check(
+        "the read tool describes itself as the evidence step",
+        "The evidence step" in flat(read_section.description),
     )
     check(
         "the graph tool describes itself as escalation",
         "ESCALATION tool, not the opening move" in flat(graph_rag_search.description),
     )
     check(
-        "the graph tool no longer sends failures back to the cheap tool",
-        "use keyword_search instead" in flat(graph_rag_search.description),
-        "naive already ran, so retrying it is the one thing that cannot help",
+        "the graph tool sends failures back to the section search, not to itself",
+        "go back to find_section" in flat(graph_rag_search.description),
+        "retrying the graph with the same wording is what cannot help",
+    )
+    check(
+        "an id is not offered as a citation",
+        "Not a citation" in read_section.args_schema.model_fields["section_id"].description
+        and "Report the LABEL" in flat(res.PROMPT),
+        "the id names a section; the label cites one",
     )
 
-    # Cheap-first means most labels now come from the vector store, so what it
-    # writes at ingest is what most citations will be. Both writers must accept
-    # a label shorter than the canonical shape without padding it out — invented
-    # pages are the failure this project has already paid for twice.
+    # Most labels now come from the section store, so what it writes at ingest is
+    # what most citations will be. Both writers must accept a label shorter than
+    # the canonical shape without padding it out — invented pages are the failure
+    # this project has already paid for twice.
     for label, prompt in (("researcher", res.PROMPT), ("responder", resp.PROMPT)):
         check(
             f"the {label} is told a short label is not an incomplete one",
@@ -642,21 +672,22 @@ def check_retrieval_cascade() -> None:
         "Never extend it" in flat(resp.PROMPT),
         "adding a plausible page is the fabrication this guards",
     )
-    check(
-        "the researcher is told the distance is not part of the label",
-        "not part of the label" in flat(res.PROMPT),
-    )
 
-    # The label a tool prints has to survive being harvested back out of the
-    # tool output, because that round trip is the whole citation check. A score
-    # printed AFTER the label is absorbed into it: the same section then has two
-    # labels depending on the tool, and a citation carrying the score passes.
-    fake = {"label": "x.pdf › page 3 › Housekeeping Supervisor › Out of Scope:", "source": "x.pdf", "index": 4}
-    line = f"[1] (distance 0.9850) {vec._label(fake)}\nsome chunk text"
-    harvested = ver._known_labels([ToolMessage(line, tool_call_id="1")])
+    # The label a tool prints has to survive being harvested back out of the tool
+    # output, because that round trip is the whole citation check. Anything
+    # printed on the same line AFTER a label is absorbed into it — which is why
+    # find_section puts the label alone on its line and the id underneath.
+    real = "x.pdf › page 3 › Housekeeping Supervisor › Out of Scope:"
+    block = (
+        f"[1] {real}\n"
+        "    id: x#housekeeping-supervisor/out-of-scope\n"
+        "    found by: headings+keyword | 48 words\n"
+        "    preview: some section text"
+    )
+    harvested = ver._known_labels([ToolMessage(block, tool_call_id="1")])
     check(
-        "a harvested vector label carries no distance",
-        harvested == {fake["label"]},
+        "a harvested section label carries nothing but the label",
+        harvested == {real},
         f"harvested: {sorted(harvested)}",
     )
 
@@ -671,7 +702,7 @@ def check_researcher() -> None:
     )
     check(
         "it must confirm graph titles against document text",
-        "confirm that exact string with keyword_search" in flat(res.PROMPT),
+        "confirm that exact string with find_section" in flat(res.PROMPT),
     )
     check("its report has to name gaps", "Gaps —" in flat(res.PROMPT))
     check(
@@ -724,12 +755,12 @@ def check_corpora() -> None:
     print("\nCorpus agreement between the two stores")
     try:
         import graph_rag.extraction as graph_extraction
-        import rag.extractor as rag_extractor
-        from agent.tools._stores import get_collection
+        from doctree import corpus
+        from doctree.tree import Node
         from graph_rag.graph_rag import WORKING_DIR
 
-        vector_meta = get_collection().get(include=["metadatas"])["metadatas"]
-        chroma = {meta["source"] for meta in vector_meta}
+        store = corpus()
+        sections = {node.source for node in store.nodes.values()}
         chunks = json.loads(
             (Path(WORKING_DIR) / "kv_store_text_chunks.json").read_text(encoding="utf-8")
         )
@@ -745,16 +776,20 @@ def check_corpora() -> None:
     graph = {head for head in heads if head.endswith(".pdf")}
     malformed = sorted({label for label, head in zip(labels, heads) if not head.endswith(".pdf")})
 
-    check("both stores are readable", True, f"chroma={len(chroma)} graph={len(graph)} files")
-    only_graph = sorted(graph - chroma)
-    only_chroma = sorted(chroma - graph)
     check(
-        "the vector store and the graph store hold the same documents",
-        not only_graph and not only_chroma,
-        f"graph-only: {only_graph or 'none'} | chroma-only: {only_chroma or 'none'}",
+        "both stores are readable",
+        True,
+        f"trees={len(sections)} graph={len(graph)} files, {len(store)} sections",
     )
-    if only_graph or only_chroma:
-        print("      fix: python scripts/ingest.py   (re-ingests data/raw into Chroma)")
+    only_graph = sorted(graph - sections)
+    only_trees = sorted(sections - graph)
+    check(
+        "the section store and the graph store hold the same documents",
+        not only_graph and not only_trees,
+        f"graph-only: {only_graph or 'none'} | trees-only: {only_trees or 'none'}",
+    )
+    if only_graph or only_trees:
+        print("      fix: python scripts/ingest.py   (re-parses data/raw into data/tree)")
 
     # A citation label with no file or page is one the responder cannot cite and
     # the verifier cannot check. The chunk is still retrievable, so this degrades
@@ -765,34 +800,101 @@ def check_corpora() -> None:
         f"{len(malformed)} without a file prefix: {malformed[:2] or 'none'}",
     )
 
-    # The same demand of the vector store, which only started meeting it once
-    # both ingests shared one extractor. A row with no label is one written by
-    # the old chunking: its text names no role, so anything retrieved from it
-    # gets attributed by guesswork. That is not a degraded citation, it is how
-    # the agent came to report a reporting line the documents do not contain.
-    unlabelled = [meta for meta in vector_meta if not meta.get("label")]
+    # The same demand of the section store. A label is built from the node's own
+    # source and heading path, so this cannot fail the way the old one could —
+    # but it can still fail on a node the parse left with no page and no
+    # headings, which is a section nothing can cite even though it is retrievable.
+    uncitable = [
+        node
+        for node in store.nodes.values()
+        if node.text and not node.label.startswith(node.source)
+    ]
     check(
-        "every vector chunk has a citable label",
-        not unlabelled,
-        f"{len(unlabelled)} of {len(vector_meta)} unlabelled"
-        + (" — re-run: python scripts/ingest.py" if unlabelled else ""),
+        "every indexed section has a citable label",
+        not uncitable,
+        f"{len(uncitable)} of {len(store)} uncitable"
+        + (" — re-run: python scripts/ingest.py" if uncitable else ""),
     )
     check(
         "both stores label sections with the same function",
-        rag_extractor.section_label is graph_extraction.section_label,
+        Node.label.fget.__globals__["section_label"] is graph_extraction.section_label,
         "separate implementations are what let the two ingests drift apart",
+    )
+    # An id has to resolve, or a search hands the model something read_section
+    # cannot open. The index and the tree are written by one call, so this
+    # catches the case where they were written at different times.
+    try:
+        from agent.tools._stores import get_heading_collection
+
+        indexed = set(get_heading_collection().get()["ids"])
+    except Exception as error:  # noqa: BLE001 - reported, not swallowed
+        check("the heading index is readable", False, f"{type(error).__name__}: {error}")
+        return
+    dangling = sorted(indexed - set(store.nodes))
+    check(
+        "every indexed id resolves to a section",
+        not dangling,
+        f"{len(dangling)} dangling: {dangling[:2] or 'none'}"
+        + (" — re-run: python scripts/ingest.py" if dangling else ""),
     )
 
 
 def check_retrieval() -> None:
-    print("\nRetrieval (BM25 only — the one retriever that needs no key)")
+    """Search and read, without an API key.
+
+    `find_sections` is called directly rather than through the tool, with the
+    heading half left out. That is the point of it taking `headings` as an
+    argument: the embedding call is the only part that needs a key, so leaving
+    it out exercises the BM25 half, the fusion and the id round trip offline —
+    which is most of what can break here.
+    """
+    print("\nRetrieval (no key: BM25 half of the section search, and a read)")
     try:
-        hits = asyncio.run(keyword_search.ainvoke({"question": "refund approval", "top_k": 2}))
+        from doctree import corpus, find_sections
+
+        store = corpus()
+        hits = find_sections("refund approval threshold", top_k=2)
     except Exception as error:  # noqa: BLE001 - reported, not swallowed
-        check("keyword_search returns hits", False, f"{type(error).__name__}: {error}")
+        check("the section search runs", False, f"{type(error).__name__}: {error}")
         return
-    check("keyword_search returns hits", "[no keyword matches]" not in hits)
-    print("\n".join(f"      {line}" for line in hits.splitlines()[:4]))
+
+    check("the section search returns hits", bool(hits), f"{len(store)} sections indexed")
+    if not hits:
+        print("      fix: python scripts/ingest.py")
+        return
+
+    check(
+        "every hit carries an id that resolves",
+        all(store.get(hit.id) is not None for hit in hits),
+    )
+    check(
+        "every hit carries a label starting with its file",
+        all(hit.label.startswith(hit.node.source) for hit in hits),
+        hits[0].label,
+    )
+    check(
+        "a hit says which retriever found it",
+        all(hit.found_by for hit in hits),
+        f"found by: {hits[0].found_by}",
+    )
+
+    # The read is the other half of the split, and the property that matters is
+    # that it returns MORE than the search did — a section whole, not a preview.
+    whole = store.read(hits[0].id)
+    check(
+        "reading a section returns the whole thing",
+        len(whole) >= len(hits[0].node.text),
+        f"{len(hits[0].node.text)} chars of own text -> {len(whole)} with sub-sections",
+    )
+    check(
+        "an unknown id is refused rather than guessed at",
+        "[no section with id" in asyncio.run(
+            read_section.ainvoke({"section_id": "no-such-document#nowhere"})
+        ),
+    )
+    for hit in hits:
+        print(f"      [{'+'.join(hit.found_by)}] {hit.label}")
+        print(f"          {hit.id}")
 
 
 def check_full_lap() -> None:

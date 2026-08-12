@@ -3,18 +3,21 @@
 They are separate endpoints because they are separate stores, filled by separate
 pipelines, at wildly different cost:
 
-    /ingest/naive   Docling parses the PDF, Chroma embeds the sections. Seconds
-                    to a minute per document, one embedding call.
-    /ingest/graph   The same parse, then an LLM reads every section to extract
-                    entities and relationships and merge them into the graph.
-                    Minutes per document, and it is the expensive one.
+    /ingest/sections  Docling parses the PDF into a section tree, written as
+                      JSON under data/tree/, then Chroma embeds one row per
+                      section keyed on its heading path. Seconds to a minute per
+                      document, one embedding call.
+    /ingest/graph     The same parse, then an LLM reads every section to extract
+                      entities and relationships and merge them into the graph.
+                      Minutes per document, and it is the expensive one.
 
 Both return `202 Accepted` with a job id rather than an answer. See api/jobs.py
 for why, and for what this job runner is not.
 
-Both are idempotent per document: the naive ingest deletes a document's existing
-chunks before writing, and the graph ingest deletes its existing sections. So
-re-ingesting a changed PDF replaces it rather than doubling it.
+Both are idempotent per document: the section ingest rewrites a document's tree
+whole and deletes its existing index rows before writing, and the graph ingest
+deletes its existing sections. So re-ingesting a changed PDF replaces it rather
+than doubling it.
 """
 
 from __future__ import annotations
@@ -24,9 +27,9 @@ from pathlib import Path
 from fastapi import APIRouter, status
 from fastapi.concurrency import run_in_threadpool
 
+from doctree import ingest_pdf
 from graph_rag import graph_rag
 from rag.config import settings as rag_settings
-from rag.pipeline import ingest_pdf
 
 from ..deps import JobsDep
 from ..paths import pdfs_at, relative, under_root
@@ -54,20 +57,25 @@ def _target(request: IngestRequest) -> Path:
 
 
 @router.post(
-    "/naive",
+    "/sections",
     response_model=JobAccepted,
     status_code=status.HTTP_202_ACCEPTED,
     responses=_ERRORS,
-    summary="Naive RAG ingest — PDFs into the Chroma vector store",
+    summary="Section ingest — PDFs into document trees and the heading index",
     description=(
-        "Parses each PDF into citable sections and writes them to Chroma, which "
-        "computes the embeddings on write.\n\n"
+        "Parses each PDF into the tree of sections its author wrote, saves that "
+        "tree as JSON under data/tree/, and writes one Chroma row per section "
+        "keyed on its heading path.\n\n"
+        "The tree is the source of truth and the index is derived from it, so "
+        "data/chroma/ can be deleted and rebuilt without re-running Docling.\n\n"
         "Returns a job id immediately. Poll `GET /jobs/{id}` until status is "
-        "`succeeded` — `result.documents` then lists what each PDF contributed.\n\n"
-        "Re-ingesting a document replaces its chunks rather than adding to them."
+        "`succeeded` — `result.documents` then lists what each PDF contributed. "
+        "The count is indexed sections, which is fewer than the tree's nodes: "
+        "a heading with no text of its own is addressable but not findable.\n\n"
+        "Re-ingesting a document replaces its tree and its rows."
     ),
 )
-async def ingest_naive(request: IngestRequest, jobs: JobsDep) -> JobAccepted:
+async def ingest_sections(request: IngestRequest, jobs: JobsDep) -> JobAccepted:
     target = _target(request)
     pdfs = pdfs_at(target)
 
@@ -80,13 +88,13 @@ async def ingest_naive(request: IngestRequest, jobs: JobsDep) -> JobAccepted:
         for pdf in pdfs:
             documents[pdf.name] = await run_in_threadpool(ingest_pdf, pdf)
         return {
-            "store": "vector",
+            "store": "sections",
             "path": relative(target),
             "documents": documents,
-            "chunks": sum(documents.values()),
+            "sections": sum(documents.values()),
         }
 
-    return JobAccepted.of(jobs.submit("ingest.naive", relative(target), work))
+    return JobAccepted.of(jobs.submit("ingest.sections", relative(target), work))
 
 
 @router.post(

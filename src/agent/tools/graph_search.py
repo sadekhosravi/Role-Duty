@@ -10,13 +10,15 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ._stores import get_rag
 
-# Graph-only retrieval strategies. LightRAG also offers "naive" (vector search)
-# and "mix" (graph + vector), and `graph_rag.query` defaults to mix because pure
-# graph retrieval returns nothing when a question's entities are not matched in
-# the graph — a silent miss. Neither belongs here: naive_rag_search is already a
-# separate tool, and folding vector search into this one would blur the two views
-# the node is supposed to compare. The backstop moves up a level instead — when
-# the graph comes back empty, the node calls the vector tool itself.
+# Graph-only retrieval strategies. LightRAG also offers "naive" (vector search
+# over its own chunks) and "mix" (graph + vector), and `graph_rag.query` defaults
+# to mix because pure graph retrieval returns nothing when a question's entities
+# are not matched in the graph — a silent miss. Neither belongs here. LightRAG's
+# vector half indexes ITS chunks, which are not the sections find_section returns,
+# so turning it on would put a second, differently-cut view of the same corpus
+# into the same result and leave the node reconciling two vocabularies. The
+# backstop moves up a level instead — when the graph comes back empty, the node
+# goes back to find_section itself.
 GraphMode = Literal["hybrid", "local", "global"]
 
 
@@ -45,8 +47,8 @@ async def graph_rag_search(question: str, mode: GraphMode = "hybrid") -> str:
 
     The ESCALATION tool, not the opening move. It runs its own model calls to
     match entities and rank relationships, which makes it far slower and far
-    more expensive than naive_rag_search — try that first, and come here only
-    when it did not settle the question.
+    more expensive than find_section and read_section — read the sections first,
+    and come here only when they did not settle the question.
 
     Graph retrieval only — no vector search. Returns the matched entities, the
     relationships connecting them (the multi-hop paths), and the source chunks
@@ -56,7 +58,9 @@ async def graph_rag_search(question: str, mode: GraphMode = "hybrid") -> str:
     that needs following a chain across sections or documents.
 
     If this returns nothing useful, the question's roles were not matched in the
-    graph. Do not retry it with the same wording — use keyword_search instead.
+    graph. Do not retry it with the same wording — go back to find_section with
+    the exact title or phrase instead; its keyword half matches literal strings
+    the graph's entity matcher missed.
     """
     # No manual clamp on `mode`: the Literal reaches the model as a JSON-schema
     # enum, and anything outside it is rejected before this function runs, with

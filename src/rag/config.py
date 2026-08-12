@@ -35,5 +35,18 @@ class Settings:
         "EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2"
     )
 
+    # The document trees (src/doctree): one JSON file per PDF, holding its
+    # sections in the shape the author wrote them. Separate from chroma_dir
+    # because it is the source of truth and the Chroma side is a derived index —
+    # deleting data/chroma/ costs a re-embed, deleting this costs a re-parse.
+    tree_dir: Path = _path("TREE_DIR", "data/tree")
+
+    # Chroma collection holding one embedding per tree node, over its HEADING
+    # PATH rather than its body. Kept apart from `collection_name` because the
+    # two answer different questions — "which passage is about this" versus
+    # "which section is this" — and mixing rows of both kinds in one collection
+    # would make every distance meaningless.
+    heading_collection_name: str = os.getenv("HEADING_COLLECTION_NAME", "headings")
+
 
 settings = Settings()

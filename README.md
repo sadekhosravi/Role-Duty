@@ -12,23 +12,32 @@ that go to, and does it stop there?"*, which turns on an escalation chain, on
 what a role is explicitly **not** allowed to do, and on not confusing two
 organisations that both have a "Duty Manager".
 
-Built on [LangGraph](https://github.com/langchain-ai/langgraph), with three
-retrievers over the same corpus, an evaluator loop, MCP for the one action that
-writes to disk, and Langfuse for tracing.
+Built on [LangGraph](https://github.com/langchain-ai/langgraph), with chunkless
+retrieval over the corpus, an evaluator loop, MCP for the one action that writes
+to disk, and Langfuse for tracing.
 
 ```
 START ─> orchestrator ─> researcher ─> back to orchestrator
                       ─> filer ─> END
-                      ─> responder ─> verifier ─> END
-                                               ─> back to orchestrator
+                      ─> responder ─> verifier ─> back to orchestrator
+                      ─> finish ─> END
 ```
 
-**Retrieval, cheapest first.** `naive_rag_search` (Chroma similarity, no model
-calls) runs first and is often enough. Only when it does not settle the
-question does the researcher escalate to `graph_rag_search`
-([LightRAG](https://github.com/HKUDS/LightRAG) — the only retriever that returns
-*relationships*, and the expensive one). `keyword_search` (BM25) confirms exact
-titles and thresholds that embeddings blur.
+**Nothing is chunked.** The documents are not cut into fixed-size windows —
+they are kept as the tree of sections their author wrote, one JSON file per PDF
+under `data/tree/`. Retrieval is then the two steps a person would take:
+`find_section` shortlists (heading embeddings fused with BM25, both on every
+call), and `read_section` returns one section whole, sub-sections included. A
+role's duties, its exclusions and its escalation path arrive together, which is
+the combination this corpus punishes you for splitting up. `graph_rag_search`
+([LightRAG](https://github.com/HKUDS/LightRAG)) stays as the escalation tier:
+the only retriever that returns *relationships*, and the expensive one.
+
+**The orchestrator decides when to stop.** The verifier grades and hands its
+verdict back like any other worker; nothing but the orchestrator can end a run.
+An evaluator that could also halt would be a second controller, and the loop
+bounds would have to be read in two places — which is how they were, and they
+disagreed.
 
 **Grounding is checked, not requested.** The responder cannot retrieve, so the
 verifier grades its claims against the same evidence the responder had. Citation
@@ -51,20 +60,22 @@ kills the request and returns nothing at all.
 Role-Duty/
 ├── data/
 │   ├── raw/            # drop your PDFs here
-│   ├── chroma/         # persisted vector DB (created automatically)
+│   ├── tree/           # the section trees, one JSON per PDF — source of truth
+│   ├── chroma/         # heading index, derived from the trees
 │   └── tickets/        # filed tickets, as .docx (created automatically)
 ├── scripts/
-│   ├── ingest.py       # PDF -> chunks -> embeddings -> Chroma
-│   ├── query.py        # prompt -> similarity search
+│   ├── ingest.py       # PDF -> section tree -> heading index
+│   ├── query.py        # find sections, read one, or print an outline
 │   ├── agent.py        # a conversation with the agent
 │   ├── serve.py        # the HTTP API (Swagger at /docs)
 │   └── check_agent.py  # the agent's wiring, checked offline
-├── src/rag/
-│   ├── config.py       # all settings in one place
-│   ├── extractor.py    # Docling: PDF -> text chunks
-│   ├── embeddings.py   # the embedding model (swap it here)
-│   ├── vector_store.py # Chroma wrapper
-│   └── pipeline.py     # ingestion orchestration
+├── src/doctree/
+│   ├── tree.py         # Node/Document — the section tree itself
+│   ├── store.py        # JSON per document, and reading a section whole
+│   ├── index.py        # one Chroma embedding per section, over its headings
+│   ├── search.py       # heading search fused with BM25, always both
+│   └── ingest.py       # PDF -> tree -> index
+├── src/rag/            # settings, the embedding model, the Chroma client
 ├── src/graph_rag/      # LightRAG graph ingest, query, and BM25 search
 ├── src/agent/          # the LangGraph workflow — see src/agent/graph.py
 ├── src/api/            # FastAPI over all of the above — see src/api/main.py
@@ -101,7 +112,7 @@ working default.
 2. Ingest them — twice, once into each store:
 
    ```bash
-   python scripts/ingest.py                       # -> Chroma (naive RAG)
+   python scripts/ingest.py                       # -> section trees + heading index
    python src/graph_rag/graph_rag.py ingest data/raw   # -> LightRAG graph
    ```
 
@@ -111,10 +122,12 @@ working default.
    python scripts/agent.py "Who authorises a refund above the threshold?"
    ```
 
-   Or search the vector store directly, with no agent and no LLM:
+   Or search the sections directly, with no agent and no answer step:
 
    ```bash
    python scripts/query.py "What is the refund policy?" --top-k 3
+   python scripts/query.py --outline sample_role_duties.pdf   # the headings
+   python scripts/query.py --read sample-role-duties#shift-supervisor
    ```
 
 4. Check the wiring at any point. ~150 assertions, offline, no API key needed:
@@ -213,14 +226,14 @@ answer the same question differently.
 | Endpoint | What it is |
 | --- | --- |
 | `POST /documents/upload` | Put a PDF in `data/raw` from the browser. Does not ingest. |
-| `GET /documents` | One row per PDF: on disk, in Chroma, in the graph. |
+| `GET /documents` | One row per PDF: on disk, in the section index, in the graph. |
 | `DELETE /documents/{name}` | Drop it from either store, or both. The PDF stays. |
-| `POST /ingest/naive` | PDFs → Chroma. Returns a **job id**. |
+| `POST /ingest/sections` | PDFs → section trees + heading index. Returns a **job id**. |
 | `POST /ingest/graph` | PDFs → LightRAG graph. Returns a **job id**. The slow, expensive one. |
 | `GET /jobs/{id}` | Poll an ingest until `succeeded` or `failed`. |
-| `POST /query/naive` | Similarity search. Ranked chunks, no LLM, no answer. |
+| `POST /query/section` | Whole sections, ranked. No LLM, no answer. |
 | `POST /query/graph` | An answer from the graph, with a `### References` section. |
-| `POST /query/keyword` | BM25 over the indexed chunks. Exact terms, no LLM. |
+| `POST /query/keyword` | BM25 over the *graph* store's chunks. A different corpus — it is there to show what the graph is working from. |
 | `POST /agent/chat` | The whole workflow, as a conversation. |
 | `GET /agent/sessions/{id}` | What a conversation remembers. |
 | `GET /tickets` | What the agent filed, and a download for each. |
@@ -334,9 +347,15 @@ Written down rather than hidden, because they are the honest state of it:
   from several. The prompts work hard to keep them apart; a question naming an
   organisation the corpus also documents can still burn most of the delegation
   budget on the wrong one.
-- `src/agent/prompts.py` is the single-node prompt the researcher's and
-  responder's prompts were written from. Nothing imports it; it is kept as
-  reference material.
+- Docling does not always detect a heading. Where it misses one, that role's
+  sub-sections end up at the top of the tree with no owner rather than being
+  attributed to the previous role — uninformative, which is the right failure,
+  but `python scripts/query.py --outline` will show a few bare
+  `Key Responsibilities` nodes because of it.
+- The heading index embeds each section's heading path *plus its opening
+  words*, not the heading path alone. Half the headings in this corpus are
+  structural ("Out of Scope"), so a pure-heading key has nothing for a question
+  about a *thing* to match. BM25 over the full text covers the rest.
 - The API keeps its jobs and its conversations in the serving process, so a
   restart loses both and a second worker would break the graph write lock. Fine
   for one node; not a deployment.
@@ -344,9 +363,13 @@ Written down rather than hidden, because they are the honest state of it:
 ## Where to go next
 
 - Cut the cost of cross-organisation questions — filter retrieval by document
-  once the question names one.
-- Let the responder cite by source *id* rather than by typing the label, so a
-  fabricated citation is unrepresentable instead of merely detectable.
+  once the question names one. The tree makes this cheap: a section id already
+  begins with its document.
+- Let the responder cite by section *id* rather than by typing the label, so a
+  fabricated citation is unrepresentable instead of merely detectable. The ids
+  now exist; what is missing is rendering them back into labels at the end.
+- Give the researcher the document outline as a tool, so it can navigate a
+  document it has already found instead of searching it again.
 - Stream `/agent/chat` over SSE, so a client can watch the workflow rather than
   wait on it.
 - Expose the graph itself — nodes, edges, and the subgraph behind an answer —

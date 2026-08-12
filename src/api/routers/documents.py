@@ -24,10 +24,11 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
 
+from doctree.ingest import remove_document
 from graph_rag import graph_rag
 from lightrag.base import DocStatus
 from rag.config import settings as rag_settings
-from rag.vector_store import delete_source, source_counts
+from rag.vector_store import source_counts
 
 from ..paths import plain_name, relative
 from ..schemas import (
@@ -38,7 +39,7 @@ from ..schemas import (
     StoreName,
     UploadResponse,
 )
-from ..stores import get_collection, get_rag, graph_write_lock
+from ..stores import get_heading_collection, get_rag, graph_write_lock
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -72,22 +73,22 @@ async def _graph_sections() -> dict[str, int]:
     response_model=DocumentList,
     summary="Every document, and which stores hold it",
     description=(
-        "One row per PDF, merged across the raw directory, the Chroma store and "
-        "the LightRAG graph. `vector_chunks: 0` with `graph_sections: 12` means "
-        "that document has had the graph ingest run on it and not the naive "
+        "One row per PDF, merged across the raw directory, the section index "
+        "and the LightRAG graph. `sections: 0` with `graph_sections: 12` means "
+        "that document has had the graph ingest run on it and not the section "
         "one.\n\n"
         "Opens the graph store on first call, which takes a moment."
     ),
 )
 async def list_documents() -> DocumentList:
     raw_dir = rag_settings.raw_data_dir
-    vector = await run_in_threadpool(source_counts, get_collection())
+    sections = await run_in_threadpool(source_counts, get_heading_collection())
     graph = await _graph_sections()
 
     files = {path.name: path for path in raw_dir.glob("*.pdf")} if raw_dir.exists() else {}
 
     documents = []
-    for name in sorted(set(files) | set(vector) | set(graph)):
+    for name in sorted(set(files) | set(sections) | set(graph)):
         path = files.get(name)
         stat = path.stat() if path else None
         documents.append(
@@ -98,7 +99,7 @@ async def list_documents() -> DocumentList:
                 modified_at=(
                     datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc) if stat else None
                 ),
-                vector_chunks=vector.get(name, 0),
+                sections=sections.get(name, 0),
                 graph_sections=graph.get(name, 0),
             )
         )
@@ -160,10 +161,10 @@ async def upload_document(
     responses={status.HTTP_400_BAD_REQUEST: {"model": ErrorResponse}},
     summary="Remove a document from the stores",
     description=(
-        "Deletes the document's chunks from Chroma and its sections from the "
-        "graph. The graph delete also prunes entities and relationships that "
-        "lose their last supporting section, while keeping those other "
-        "documents still cite.\n\n"
+        "Deletes the document's tree and its rows from the section index, and "
+        "its sections from the graph. The graph delete also prunes entities and "
+        "relationships that lose their last supporting section, while keeping "
+        "those other documents still cite.\n\n"
         "The PDF itself stays in data/raw — removing it from an index and "
         "deleting the source are different intentions, and only one of them is "
         "reversible by re-ingesting.\n\n"
@@ -179,7 +180,9 @@ async def delete_document(
 
     removed = 0
     if store in {"all", "vector"}:
-        removed = await run_in_threadpool(delete_source, get_collection(), name)
+        # Both halves in one call: the index rows and the tree they resolve to
+        # have to go together, and doctree owns the order they go in.
+        removed = await run_in_threadpool(remove_document, name)
 
     graph_result = "not requested"
     if store in {"all", "graph"}:
@@ -189,5 +192,5 @@ async def delete_document(
             graph_result = await graph_rag.remove(name, rag=rag)
 
     return DeleteDocumentResponse(
-        name=name, store=store, vector_chunks_removed=removed, graph=graph_result
+        name=name, store=store, sections_removed=removed, graph=graph_result
     )

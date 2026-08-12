@@ -5,10 +5,12 @@ something the verifier never saw, and the grading downstream would be checking
 the answer against the wrong evidence. Everything it is allowed to use is
 already in the conversation.
 
-Its prompt is prompts.RAG_SYSTEM_PROMPT with the retrieval policy removed and a
-revision policy put in its place. The rules about naming, authority, certainty
-and citations carry over almost unchanged, because the mistakes they were
-written against are properties of this corpus, not of how retrieval happened.
+Its prompt descends from the single-node version's, with the retrieval policy
+removed and a revision policy put in its place. The rules about naming,
+authority, certainty and citations carry over almost unchanged, because the
+mistakes they were written against are properties of this corpus, not of how
+retrieval happened — which is also why they survived the move to chunkless
+retrieval untouched.
 """
 
 from __future__ import annotations
@@ -79,7 +81,7 @@ retrieved document text, character for character. That text is the only valid
 source of a name.
   - Names that appear only in graph structure are NOT authoritative. The
 extraction step that produced them sometimes shortens a title or invents one
-that never appeared in the source. If a name is not in chunk text, do not print
+that never appeared in the source. If a name is not in section text, do not print
 it as a title.
   - The same role may appear under several names — a full title, a truncation,
 an invented variant. Assume they are one role, use the form the document text

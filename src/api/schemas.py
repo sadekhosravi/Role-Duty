@@ -121,8 +121,8 @@ class JobList(BaseModel):
 # --- Querying ------------------------------------------------------------------
 
 
-class VectorQueryRequest(Request):
-    """A similarity search over the Chroma store — retrieval only, no answer."""
+class SectionQueryRequest(Request):
+    """A search over the document trees — retrieval only, no answer."""
 
     model_config = ConfigDict(
         extra="forbid",
@@ -131,31 +131,61 @@ class VectorQueryRequest(Request):
         },
     )
 
-    query: str = Field(min_length=1, description="The question or prompt to match.")
-    top_k: int = Field(default=5, ge=1, le=50, description="How many chunks to return.")
+    query: str = Field(min_length=1, description="The question or literal phrase to match.")
+    top_k: int = Field(default=5, ge=1, le=50, description="How many sections to return.")
+    include_text: bool = Field(
+        default=True,
+        description=(
+            "Return each section's full text. False gives the shortlist alone — "
+            "labels, ids and previews — which is what the agent sees before it "
+            "decides what to read."
+        ),
+    )
 
 
-class VectorHit(BaseModel):
-    """One retrieved chunk."""
+class SectionHit(BaseModel):
+    """One retrieved section, whole."""
 
     rank: int
+    id: str = Field(
+        description=(
+            'How to address the section, e.g. "sample-role-duties#shift-'
+            'supervisor". Stable across a re-ingest. Not a citation.'
+        )
+    )
     label: str = Field(
         description=(
-            'The citation label stored at ingest, e.g. "x.pdf › page 2 › Duty '
-            'Manager › Escalation Path". Falls back to source and index for a '
-            "store written before labels existed."
+            'The citation, e.g. "x.pdf › page 2 › Duty Manager › Escalation '
+            'Path". This is what an answer quotes, never the id.'
         )
     )
     source: str
     page: int | None = None
-    distance: float = Field(description="Chroma distance — lower is closer.")
-    text: str
+    score: float = Field(
+        description=(
+            "Reciprocal-rank-fusion score. Comparable within one result set and "
+            "meaningless between two — it is built from ranks, not distances."
+        )
+    )
+    found_by: list[str] = Field(
+        description=(
+            "Which retrievers found it: 'headings' (embeddings), 'keyword' "
+            "(BM25), or both. Both agreeing is a stronger signal than either "
+            "ranking it first."
+        )
+    )
+    words: int
+    text: str | None = Field(
+        default=None,
+        description="The section and its sub-sections. Null when include_text is false.",
+    )
+    preview: str
 
 
-class VectorQueryResponse(BaseModel):
+class SectionQueryResponse(BaseModel):
     query: str
     top_k: int
-    results: list[VectorHit]
+    results: list[SectionHit]
 
 
 class GraphQueryRequest(Request):
@@ -346,7 +376,7 @@ class DocumentStatus(BaseModel):
     raw_path: str | None = Field(default=None, description="Null if the PDF is not on disk.")
     size_bytes: int | None = None
     modified_at: datetime | None = None
-    vector_chunks: int = Field(default=0, description="Chunks in the Chroma store.")
+    sections: int = Field(default=0, description="Sections in the heading index.")
     graph_sections: int = Field(default=0, description="Section documents in the LightRAG graph.")
 
 
@@ -361,7 +391,7 @@ class UploadResponse(BaseModel):
     size_bytes: int
     replaced: bool = Field(description="Whether a file of that name was overwritten.")
     note: str = Field(
-        default="Uploaded only. Call /ingest/naive or /ingest/graph to index it.",
+        default="Uploaded only. Call /ingest/sections or /ingest/graph to index it.",
         description="Uploading does not ingest — the two are separate on purpose.",
     )
 
@@ -369,7 +399,7 @@ class UploadResponse(BaseModel):
 class DeleteDocumentResponse(BaseModel):
     name: str
     store: StoreName
-    vector_chunks_removed: int
+    sections_removed: int
     graph: str = Field(description="What the graph store reported, verbatim.")
 
 
@@ -391,11 +421,18 @@ class TicketList(BaseModel):
 # --- Health --------------------------------------------------------------------
 
 
-class VectorStoreHealth(BaseModel):
-    directory: str
-    exists: bool
+class SectionStoreHealth(BaseModel):
+    """The chunkless store: trees on disk, and the heading index over them.
+
+    Both counts, because they are written by the same ingest and can still
+    disagree — and when they do, which one is behind says what went wrong.
+    """
+
+    tree_dir: str
+    trees: int = Field(description="Documents parsed into data/tree/ as JSON.")
+    directory: str = Field(description="The Chroma directory holding the heading index.")
     collection: str
-    chunks: int
+    indexed_sections: int = Field(description="Sections findable by search.")
     documents: int
 
 
@@ -418,7 +455,7 @@ class HealthResponse(BaseModel):
     status: Literal["ok"] = "ok"
     raw_dir: str
     raw_pdfs: int
-    vector: VectorStoreHealth
+    sections: SectionStoreHealth
     graph: GraphStoreHealth
     tickets_dir: str
     tickets: int

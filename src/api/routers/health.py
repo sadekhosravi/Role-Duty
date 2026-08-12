@@ -19,16 +19,15 @@ from rag.vector_store import source_counts
 from ticket_mcp.document import tickets_dir
 
 from ..paths import relative
-from ..schemas import GraphStoreHealth, HealthResponse, TracingHealth, VectorStoreHealth
-from ..stores import get_collection
+from ..schemas import GraphStoreHealth, HealthResponse, SectionStoreHealth, TracingHealth
+from ..stores import get_heading_collection
 
 router = APIRouter(tags=["health"])
 
 
 def _read_health() -> HealthResponse:
     """Gather the whole picture. Synchronous — every call here hits the disk."""
-    collection = get_collection()
-    counts = source_counts(collection)
+    counts = source_counts(get_heading_collection())
     tickets = tickets_dir()
 
     return HealthResponse(
@@ -36,11 +35,18 @@ def _read_health() -> HealthResponse:
         raw_pdfs=len(list(rag_settings.raw_data_dir.glob("*.pdf")))
         if rag_settings.raw_data_dir.exists()
         else 0,
-        vector=VectorStoreHealth(
+        sections=SectionStoreHealth(
+            tree_dir=relative(rag_settings.tree_dir),
+            # Both halves reported, because they can disagree and the disagreement
+            # is the diagnosis. Trees but no index means the embedding call failed
+            # partway; index but no trees means someone deleted data/tree/ and the
+            # ids in Chroma now resolve to nothing.
+            trees=len(list(rag_settings.tree_dir.glob("*.json")))
+            if rag_settings.tree_dir.exists()
+            else 0,
             directory=relative(rag_settings.chroma_dir),
-            exists=rag_settings.chroma_dir.exists(),
-            collection=rag_settings.collection_name,
-            chunks=sum(counts.values()),
+            collection=rag_settings.heading_collection_name,
+            indexed_sections=sum(counts.values()),
             documents=len(counts),
         ),
         graph=GraphStoreHealth(
@@ -60,8 +66,9 @@ def _read_health() -> HealthResponse:
     summary="Server status and what is in each store",
     description=(
         "Answers without calling any model provider, so it is cheap enough to "
-        "poll. Use it to check that an ingest actually landed: `vector.chunks` "
-        "and `graph.indexed_chunks` are the two stores, filled separately."
+        "poll. Use it to check that an ingest actually landed: "
+        "`sections.indexed_sections` and `graph.indexed_chunks` are the two "
+        "stores, filled separately."
     ),
 )
 async def health() -> HealthResponse:
