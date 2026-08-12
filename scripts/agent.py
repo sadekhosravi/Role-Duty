@@ -30,7 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
 
 from agent import observability
-from agent.conversation import reply_for, should_offer_ticket, ticket_offer
+from agent.conversation import final_reply, reply_for, should_offer_ticket, ticket_offer
 from agent.graph import run_workflow
 
 PROMPT = "\nyou> "
@@ -40,7 +40,7 @@ QUIT = {"exit", "quit", ":q", "bye"}
 # loads it by path and asks it what it would offer). They live in
 # agent/conversation.py because the HTTP API applies the same ones, and a rule
 # maintained in two places is a rule maintained in one.
-__all__ = ["reply_for", "should_offer_ticket", "ticket_offer"]
+__all__ = ["final_reply", "reply_for", "should_offer_ticket", "ticket_offer"]
 
 
 async def turn(
@@ -78,7 +78,10 @@ async def turn(
             file=sys.stderr,
         )
 
-    reply = reply_for(state)
+    # Read, not composed: the node that ended the run already built this, so the
+    # string printed here and the string kept in `history` below are the same
+    # one the workflow decided on.
+    reply = final_reply(state)
 
     print(f"\n{reply}")
 

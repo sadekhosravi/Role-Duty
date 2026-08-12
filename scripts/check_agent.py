@@ -31,11 +31,13 @@ from agent.nodes import responder as resp
 from agent.nodes import verifier as ver
 from agent.state import (
     FILER,
+    FINISH,
     MAX_DELEGATIONS,
     MAX_RETRIEVALS,
     MAX_REVISIONS,
     ORCHESTRATOR,
     RESPONDER,
+    ROUTES,
     WORKERS,
 )
 from agent.tools import graph_rag_search, keyword_search, naive_rag_search
@@ -114,12 +116,27 @@ def check_structure() -> None:
         "the answer is only ever graded after the responder writes it",
     )
     check("responder always hands to the verifier", (RESPONDER, "verifier") in edges)
-    check("the verifier can end the run", ("verifier", "__end__") in edges)
-    check("the verifier can send work back", ("verifier", ORCHESTRATOR) in edges)
+    check("the verifier reports back to the orchestrator", ("verifier", ORCHESTRATOR) in edges)
+    check(
+        "the verifier cannot end the run",
+        ("verifier", "__end__") not in edges,
+        "it grades; the orchestrator decides when grading is over",
+    )
+    check(
+        "the orchestrator can end the run",
+        (ORCHESTRATOR, "__end__") in edges,
+        f"via the {FINISH!r} route",
+    )
     check(
         "the filer ends the run itself",
         (FILER, "__end__") in edges,
         "it acts rather than gathers, so there is nothing to hand back",
+    )
+    check(
+        "the orchestrator and the filer are the only ways out",
+        {source for source, target in edges if target == "__end__"}
+        == {ORCHESTRATOR, FILER},
+        "one exit for answers, one for actions, and no third opinion",
     )
     check(
         "the filer never routes onward to the responder or the verifier",
@@ -163,6 +180,16 @@ def check_tool_boundaries() -> None:
 
 def check_routers() -> None:
     print("\nRouters")
+    from agent import graph as wiring
+    from agent.graph import ROUTE_TARGETS
+
+    check(
+        "there is exactly one router",
+        [name for name in vars(wiring) if name.startswith("_route")]
+        == ["_route_to_worker"],
+        "a second node deciding where control goes is a second place the loop "
+        "bounds have to be re-derived, and last time they were not",
+    )
     check(
         "no choice falls through to the responder",
         orch_route(AgentState()) == RESPONDER,
@@ -171,15 +198,18 @@ def check_routers() -> None:
         "a choice is honoured",
         orch_route(AgentState(next_node="researcher")) == "researcher",
     )
-    check("a passing answer ends the run", verify_route(AgentState(verdict="pass")) == "__end__")
     check(
-        "a failing answer goes back",
-        verify_route(AgentState(verdict="fail", revisions=0)) == ORCHESTRATOR,
+        "every route has a target",
+        set(ROUTE_TARGETS) == set(ROUTES),
+        f"routes: {sorted(ROUTES)}",
     )
     check(
-        "a failing answer stops at the revision cap",
-        verify_route(AgentState(verdict="fail", revisions=MAX_REVISIONS)) == "__end__",
-        f"MAX_REVISIONS={MAX_REVISIONS}",
+        "finish is the route that ends the run",
+        ROUTE_TARGETS[FINISH] == "__end__",
+    )
+    check(
+        "every worker routes to itself",
+        all(ROUTE_TARGETS[worker] == worker for worker in WORKERS),
     )
 
 
@@ -187,12 +217,6 @@ def orch_route(state: AgentState) -> str:
     from agent.graph import _route_to_worker
 
     return _route_to_worker(state)
-
-
-def verify_route(state: AgentState) -> str:
-    from agent.graph import _route_after_verify
-
-    return _route_after_verify(state)
 
 
 def check_orchestrator() -> None:
@@ -204,6 +228,11 @@ def check_orchestrator() -> None:
     check(
         "its decision is constrained to an enum",
         orch.Route.model_json_schema()["properties"]["next_node"]["enum"] == list(WORKERS),
+    )
+    check(
+        "the model cannot choose to stop",
+        FINISH not in orch.Route.model_json_schema()["properties"]["next_node"]["enum"],
+        "stopping is read off the verdict and the counters, not asked for",
     )
     check(
         "it works out the task before picking who does it",
@@ -239,6 +268,81 @@ def check_orchestrator() -> None:
     check(
         "it is told when the verifier rejected the answer",
         "rejected" in orch._progress(AgentState(verdict="fail", revisions=1)),
+    )
+    check_finalizer()
+
+
+def check_finalizer() -> None:
+    """The termination rules, which moved here from the verifier's own router.
+
+    All of it is decidable without a model, and all of it runs before any model
+    call in orch.run — so these assertions exercise the real code path rather
+    than an offline approximation of it.
+    """
+    print("\nOrchestrator as finalizer")
+    graded = dict(delegations=["researcher", RESPONDER], answer="An answer.")
+
+    check(
+        "an ungraded run is not finished",
+        not orch._is_done(AgentState(**graded)),
+        "verdict is None for the whole gathering phase",
+    )
+    check(
+        "a passing answer finishes the run",
+        orch._is_done(AgentState(**graded, verdict="pass")),
+    )
+    check(
+        "an answer the grader could not grade finishes the run",
+        orch._is_done(AgentState(**graded, verdict="ungraded")),
+        "nothing about it is known to be wrong, so a revision would buy nothing",
+    )
+    check(
+        "a failing answer goes back for another pass",
+        not orch._is_done(AgentState(**graded, verdict="fail", revisions=0)),
+    )
+    check(
+        "a failing answer stops at the revision cap",
+        orch._is_done(AgentState(**graded, verdict="fail", revisions=MAX_REVISIONS)),
+        f"MAX_REVISIONS={MAX_REVISIONS}",
+    )
+
+    passed = AgentState(**graded, verdict="pass", ticket_recipient="Duty Manager")
+    result = asyncio.run(orch.run(passed))
+    check(
+        "finishing costs no model call",
+        result["next_node"] == FINISH,
+        "the terminal branch returns before the router is built",
+    )
+    check(
+        "it composes the reply the caller will show",
+        "Duty Manager" in result["reply"] and result["reply"].startswith("An answer."),
+        "the answer, then the ticket offer",
+    )
+    check(
+        "it does not touch the graded answer",
+        "answer" not in result,
+        "the verifier graded that exact string; appending an offer to it would "
+        "mean the text that was checked is not the text that goes out",
+    )
+    check(
+        "finishing delegates to nobody and says nothing",
+        "delegations" not in result and "messages" not in result,
+    )
+
+    # The ordering bug this design has to avoid: now that the verifier hands
+    # back, a run that is both graded and out of delegations arrives here again.
+    # If the cap were read first it would answer, be graded, and be sent to the
+    # responder once more, forever.
+    capped_and_passed = AgentState(
+        delegations=["researcher"] * MAX_DELEGATIONS,
+        answer="An answer.",
+        verdict="pass",
+    )
+    result = asyncio.run(orch.run(capped_and_passed))
+    check(
+        "a finished run at the delegation cap still finishes",
+        result["next_node"] == FINISH,
+        "the terminal branch is checked before the cap, and that order is the bug",
     )
 
 
@@ -695,7 +799,13 @@ def check_full_lap() -> None:
     """Drive the whole topology with fake bodies, so no model is involved.
 
     This is the check that proves the edges work: a delegation, a hand-back, an
-    answer, a rejection, and the revision cap ending it.
+    answer, a rejection, the verdict returning to the orchestrator, and the
+    revision cap ending it there.
+
+    Only the model calls are faked. The termination rule is the real one — the
+    fake orchestrator calls `orch._is_done` and `orch._finish` rather than
+    reimplementing them, because a lap that terminates by its own private rule
+    proves the edges and nothing about the rule the agent actually runs.
     """
     print("\nA full lap with substituted node bodies")
     trace = []
@@ -707,13 +817,16 @@ def check_full_lap() -> None:
         return run
 
     async def orchestrator(state: AgentState) -> dict:
-        """Delegate to the researcher once, then write the answer.
+        """Delegate to the researcher once, then write the answer, then stop.
 
         The first pass has to be a real delegation, otherwise the run goes
         straight to the responder and the worker hand-back edge — the one thing
         a lap is meant to prove — is never crossed.
         """
         trace.append(ORCHESTRATOR)
+        if orch._is_done(state):
+            trace.append(FINISH)
+            return orch._finish(state)
         first_pass = "researcher" not in state.delegations
         target = "researcher" if first_pass else RESPONDER
         return {"next_node": target, "delegations": [target]}
@@ -766,6 +879,24 @@ def check_full_lap() -> None:
         "a rejected answer is still returned",
         AgentState(**result).answer == f"draft {MAX_REVISIONS}",
         "the cap ends the loop, so the caller gets the last attempt",
+    )
+    check(
+        "every verdict went back to the orchestrator",
+        all(
+            trace[position + 1] == ORCHESTRATOR
+            for position, name in enumerate(trace)
+            if name == "verifier"
+        ),
+        "the verifier reports; it no longer has an exit of its own",
+    )
+    check(
+        "the run ended at the orchestrator's finish route",
+        trace[-2:] == [ORCHESTRATOR, FINISH],
+    )
+    check(
+        "the caller was left a reply to show",
+        AgentState(**result).reply == f"draft {MAX_REVISIONS}",
+        "composed on the way out, with no offer on a rejected answer",
     )
 
 
@@ -1007,6 +1138,29 @@ def check_tickets() -> None:
         supervisor in cli.ticket_offer(supervisor)
         and "data/tickets" in cli.ticket_offer(supervisor),
         cli.ticket_offer(supervisor),
+    )
+
+    # --- who composes the reply, and who reads it -------------------------
+    #
+    # The workflow now builds the user-facing string once, at the node that ends
+    # the run, and both front ends read it. These check that reading it and
+    # composing it agree, and that a state carrying one is not silently
+    # recomposed into a different one.
+    composed = cli.reply_for(reply())
+    check(
+        "the composed reply is the answer followed by the offer",
+        composed.startswith(f"Report it to the {supervisor}.")
+        and cli.ticket_offer(supervisor) in composed,
+    )
+    check(
+        "a front end reads the reply the graph built",
+        cli.final_reply(reply(reply="what the user saw")) == "what the user saw",
+        "the string shown and the string remembered have to be the same one",
+    )
+    check(
+        "a run that ended without one is still answerable",
+        cli.final_reply(reply()) == composed,
+        "a front end printing nothing is worse than a recomputed string",
     )
     check(
         "the recipient is an observation, not a grading criterion",

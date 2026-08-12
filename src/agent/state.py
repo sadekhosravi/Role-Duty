@@ -6,11 +6,13 @@ dict that will accept any key and any value. `AgentState` is checked when it is
 actually used, so a malformed update fails where it happens instead of surfacing
 later as a confusing error inside a model call.
 
-This module also owns the workflow's *vocabulary* — the node names and the set a
-router may return. They live here rather than in graph.py because the state is
-what carries a routing decision between nodes, and putting them here is what lets
-`next_node` be a constrained Literal instead of a free string. graph.py imports
-them back when it wires the edges.
+This module also owns the workflow's *vocabulary* — the node names, and the two
+sets a routing decision is drawn from: the workers a model may be asked to pick,
+and the wider set of destinations the graph knows how to follow. They live here
+rather than in graph.py because the state is what carries a routing decision
+between nodes, and putting them here is what lets `next_node` be a constrained
+Literal instead of a free string. graph.py imports them back when it wires the
+edges.
 
 Two behaviours of Pydantic state are worth knowing, both verified against the
 installed LangGraph (1.2.10) rather than taken on faith:
@@ -52,6 +54,31 @@ VERIFIER = "verifier"
 # destination is rejected before it can be routed on.
 WorkerName = Literal["researcher", "filer", "responder"]
 WORKERS: tuple[str, ...] = get_args(WorkerName)
+
+# Not a node: the destination that ends the run. It exists so that "stop" is a
+# thing the orchestrator *returns*, in the same field and through the same edge
+# as every other decision, rather than a second router somewhere else deciding
+# it. The graph maps it to END.
+FINISH = "finish"
+
+# Everywhere control can go from the orchestrator. Deliberately wider than
+# WorkerName, and the split is the point: a *worker* is something the model may
+# be asked to pick, a *route* is something the graph knows how to follow. Only
+# the first set reaches the model as an enum, so `finish` is not a choice the
+# model can make — the orchestrator's own code decides that, which is what keeps
+# the revision cap enforced in Python rather than by asking nicely.
+RouteName = Literal["researcher", "filer", "responder", "finish"]
+ROUTES: tuple[str, ...] = get_args(RouteName)
+
+# The two Literals are written out separately because typing cannot subtract
+# one from the other, and a duplicated list is a list that drifts. Checked at
+# import so it drifts loudly.
+if not set(WORKERS) < set(ROUTES):
+    raise RuntimeError(
+        f"every worker must be routable: {sorted(set(WORKERS) - set(ROUTES))} is not"
+    )
+if FINISH not in ROUTES:
+    raise RuntimeError(f"{FINISH!r} must be a route")
 
 # How many times the verifier may send an answer back for another pass. The loop
 # needs a bound: a verifier that keeps failing an answer the workers cannot
@@ -96,10 +123,16 @@ class AgentState(BaseModel):
     on that, since each pass has to see everything retrieved so far. It also
     accepts `("user", "...")` tuples and converts them to message objects."""
 
-    next_node: WorkerName | None = Field(
+    next_node: RouteName | None = Field(
         default=None,
-        description="The worker the orchestrator picked. None means it is done.",
+        description=(
+            "Where the orchestrator sent control: a worker, or 'finish' to end "
+            "the run. None only before it has run at all."
+        ),
     )
+    """Typed as RouteName rather than WorkerName because the orchestrator can now
+    end the run, and ending it is a routing decision like any other. What the
+    *model* may pick is still WorkerName — see nodes/orchestrator.py."""
     delegations: Annotated[list[str], operator.add] = Field(
         default_factory=list,
         description="Every worker the orchestrator has run, in order.",
@@ -116,6 +149,17 @@ class AgentState(BaseModel):
     """Kept as its own field rather than read off the end of `messages`, because
     the verifier appends its critique after the answer — so the last message is
     routinely *not* the thing the user asked for. This is what `ask()` returns."""
+
+    reply: str | None = Field(
+        default=None,
+        description="The finished user-facing reply. Set by whichever node ends the run.",
+    )
+    """The answer plus the ticket offer, when there is one — see
+    agent/conversation.py, which composes it. A second field rather than an
+    edit to `answer`, and that separation is load-bearing: `answer` is the
+    artifact the verifier graded, and appending an offer to it after grading
+    would mean the string that was checked is not the string that goes out.
+    Callers read this; nodes write it exactly once, at the end."""
 
     verdict: Literal["pass", "fail", "ungraded"] | None = Field(
         default=None,

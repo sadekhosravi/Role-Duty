@@ -1,14 +1,23 @@
-"""The orchestrator: picks which worker runs next, and nothing else.
+"""The orchestrator: picks which worker runs next, and decides when to stop.
 
 It is the only node that decides where control goes. Every worker reports back
-here, and the run ends when it routes to the responder and the verifier accepts
-what the responder wrote.
+here — including the verifier, whose verdict is a report like any other — and
+the run ends when this node routes to `finish`.
 
-Two things keep it from looping, which is the documented failure mode of this
+Two jobs, and only one of them is the model's. Delegating is a judgement, so a
+model makes it. Stopping is not: it is a reading of the verdict and two counters,
+and it is decided in `run()` before any model call. Keeping it there is what
+makes the revision cap a fact rather than an instruction — a prompt that says
+"stop after two revisions" is a prompt that will eventually not.
+
+Three things keep it from looping, which is the documented failure mode of this
 pattern. Its destination is a constrained Literal, so it cannot invent a worker
-or name itself; and `state.delegations` records what it has already run and is
-fed back to it every turn, so "researcher again" is a choice it has to justify
-rather than the default. MAX_DELEGATIONS is the backstop under both.
+or name itself; `state.delegations` records what it has already run and is fed
+back to it every turn, so "researcher again" is a choice it has to justify rather
+than the default; and MAX_DELEGATIONS is the backstop under both. The terminal
+branch below is checked before all of them, which matters more than it looks:
+now that the verifier hands back here, a cap that fired first would send the
+answer to the responder again on every pass and never reach the exit.
 """
 
 from __future__ import annotations
@@ -18,9 +27,11 @@ import logging
 from langchain_core.messages import HumanMessage
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..conversation import reply_for
 from ..llm import build_structured_llm
 from ..spec import NodeSpec
 from ..state import (
+    FINISH,
     MAX_DELEGATIONS,
     MAX_REVISIONS,
     ORCHESTRATOR,
@@ -256,6 +267,44 @@ def _progress(state: AgentState) -> str:
     return "\n".join(lines)
 
 
+def _is_done(state: AgentState) -> bool:
+    """Whether the run is over, read off the verdict and the revision count.
+
+    `verdict` is None until the verifier has run, so this is False for the whole
+    gathering phase and the question does not arise. Once it has:
+
+      pass      the answer is grounded, and there is nothing better to do.
+      ungraded  the grader itself failed. Nothing about the answer is known to
+                be wrong, so re-answering would spend a revision on a problem
+                the answer never had; the caller is told it went out unchecked.
+      fail      send it back — but only while revisions remain. At the cap the
+                current answer goes out with its failed verdict, which is a
+                worse answer and still an answer, where looping is neither.
+
+    No model call, on purpose. This is arithmetic, and the one bound that must
+    hold even when the model is wrong about everything else.
+    """
+    if state.verdict is None:
+        return False
+    return state.verdict != "fail" or state.revisions >= MAX_REVISIONS
+
+
+def _finish(state: AgentState) -> dict:
+    """End the run, composing the reply the caller will show.
+
+    The one thing this must not touch is `state.answer`. The verifier graded
+    that exact string, and the ticket offer appended here was never part of what
+    it graded — writing the composed reply back over the answer would mean the
+    text that was checked is not the text that goes out. So it lands in its own
+    field, and `answer` stays the graded artifact.
+
+    Nothing is appended to `messages` and nothing to `delegations` either: this
+    turn delegated to nobody, and a finishing note in the conversation would be
+    read as evidence by the next turn that sees it.
+    """
+    return {"next_node": FINISH, "reply": reply_for(state)}
+
+
 def _delegation(target: str, brief: str) -> HumanMessage:
     """The brief, addressed to the worker that is about to run.
 
@@ -272,7 +321,14 @@ def _delegation(target: str, brief: str) -> HumanMessage:
 
 
 async def run(state: AgentState) -> dict:
-    """Choose the next worker, and tell it what to do."""
+    """Choose the next worker, or end the run."""
+    # Checked first, and the order is not cosmetic. The verifier now reports
+    # back here, so a run that has already been graded arrives at this function
+    # again; if the delegation cap were read first, a capped run would answer,
+    # be graded, return, and be sent to the responder once more, forever.
+    if _is_done(state):
+        return _finish(state)
+
     # The cap is enforced here rather than in the router so that hitting it does
     # not cost a model call, and so the decision is recorded like any other.
     if len(state.delegations) >= MAX_DELEGATIONS:

@@ -2,13 +2,24 @@
 
     START -> orchestrator -> researcher -> back to orchestrator
                           -> filer -> END
-                          -> responder -> verifier -> END
-                                                   -> back to orchestrator
+                          -> responder -> verifier -> back to orchestrator
+                          -> finish -> END
 
 Orchestrator-workers with one evaluator loop. The orchestrator is the only node
 that decides what happens next: it picks one worker, that worker reports back,
-and it picks again until it routes to the responder. The responder's draft then
-goes to the verifier, which either ends the run or sends it back around.
+and it picks again until it routes to the responder. The responder's draft goes
+to the verifier, and the verifier hands its verdict back here like any other
+worker's report.
+
+That last part is deliberate and it was not always so. The verifier used to end
+the run itself, through a second conditional edge of its own — which made two
+nodes able to terminate and split the loop budget across both of them, so the
+question "when does this stop?" had two answers in two files. Now there is one:
+the orchestrator reads the verdict and routes to `finish`, and `finish` is the
+only non-filer way out. The evaluator grades; the supervisor decides. Sending
+the graded answer back through the node that owns the loop is the shape the
+evaluator-optimizer pattern is usually drawn in, and the reason is exactly this
+— a critic that can also halt is a second controller.
 
 The filer is the exception, and the only worker that does not hand back. It
 takes an action rather than gathering evidence, so there is nothing for the
@@ -32,10 +43,11 @@ mechanical runner for whatever its node asked for, and it always hands control
 straight back. A worker loops on its own tools until it produces a message with
 no tool calls, and only then reports to the orchestrator.
 
-Both loops are bounded — MAX_DELEGATIONS on the orchestrator's, MAX_REVISIONS on
-the verifier's. Neither bound is decoration: without them a disagreement between
-two nodes runs until LangGraph's recursion limit kills the request outright,
-which returns nothing at all rather than an imperfect answer.
+Both loops are bounded — MAX_DELEGATIONS on the delegation loop, MAX_REVISIONS
+on the revision loop — and both bounds are now read in the same place, the
+orchestrator's own body. Neither is decoration: without them a disagreement
+between two nodes runs until LangGraph's recursion limit kills the request
+outright, which returns nothing at all rather than an imperfect answer.
 
 Usage:
     python scripts/agent.py "Who authorizes a UPS bypass?"
@@ -55,7 +67,7 @@ from agent.observability import trace_run
 from agent.spec import NodeSpec
 from agent.state import (
     FILER,
-    MAX_REVISIONS,
+    FINISH,
     ORCHESTRATOR,
     RESEARCHER,
     RESPONDER,
@@ -69,25 +81,26 @@ from agent.state import (
 WIRED_NODES = (ORCHESTRATOR, RESEARCHER, FILER, RESPONDER, VERIFIER)
 
 
+# Where the orchestrator's decision can send control. `finish` is not a node —
+# it is the name the orchestrator returns when the run is over, mapped here to
+# LangGraph's END. Keeping it in the same field as the workers is what makes
+# "stop" a routing decision rather than a special case someone has to remember.
+ROUTE_TARGETS: dict[str, str] = {**{worker: worker for worker in WORKERS}, FINISH: END}
+
+
 def _route_to_worker(state: AgentState) -> str:
-    """Send control to the worker the orchestrator chose.
+    """Follow the orchestrator's decision.
 
     `next_node` is a Literal, so an invented destination cannot reach here; the
     only case left is no choice at all, which means the orchestrator is done
     delegating and the answer should be written.
+
+    This is the workflow's only router. Adding a second one is the change to
+    resist — every node that can decide where control goes is another place the
+    loop bounds have to be re-derived, and they were not, the last time there
+    were two.
     """
     return state.next_node or RESPONDER
-
-
-def _route_after_verify(state: AgentState) -> str:
-    """End the run, or send the answer back for another pass.
-
-    Hitting the revision cap returns the current answer with its failed verdict,
-    which is a worse answer but still an answer.
-    """
-    if state.verdict == "fail" and state.revisions < MAX_REVISIONS:
-        return ORCHESTRATOR
-    return END
 
 
 class Workflow(BaseModel):
@@ -148,10 +161,10 @@ class Workflow(BaseModel):
 
         builder.add_edge(START, ORCHESTRATOR)
 
-        # The orchestrator delegates to exactly one worker at a time. The
-        # destination list is WORKERS, so a node not in it can never be routed
+        # The orchestrator sends control to exactly one destination at a time.
+        # The mapping is ROUTE_TARGETS, so a node not in it can never be routed
         # to no matter what the orchestrator returns.
-        builder.add_conditional_edges(ORCHESTRATOR, _route_to_worker, list(WORKERS))
+        builder.add_conditional_edges(ORCHESTRATOR, _route_to_worker, ROUTE_TARGETS)
 
         # Workers report back and let the orchestrator decide again.
         self._continue_from(builder, RESEARCHER, ORCHESTRATOR)
@@ -160,9 +173,11 @@ class Workflow(BaseModel):
         # gathers, and its confirmation is already the user-facing reply.
         self._continue_from(builder, FILER, END)
 
-        # The answer is always graded before it can leave.
+        # The answer is always graded before it can leave, and the grade always
+        # goes back to the orchestrator. A plain edge, not a conditional one:
+        # the verifier reports, it does not decide.
         self._continue_from(builder, RESPONDER, VERIFIER)
-        builder.add_conditional_edges(VERIFIER, _route_after_verify, [ORCHESTRATOR, END])
+        self._continue_from(builder, VERIFIER, ORCHESTRATOR)
 
         return builder.compile()
 

@@ -64,14 +64,35 @@ def should_offer_ticket(state: AgentState) -> bool:
 
 
 def reply_for(state: AgentState) -> str:
-    """The whole user-facing reply for one turn: the answer, plus the offer.
+    """Compose the user-facing reply for one turn: the answer, plus the offer.
 
     This is also what a caller should keep as the turn's transcript entry.
     Dropping the offer from what is remembered would leave the next turn's
     "yes" agreeing to nothing on record, which is the difference between the
     filer having something to file and it asking the user to start over.
+
+    Called by the node that ends the run, which stores the result in
+    `state.reply`. Front ends should read that through `final_reply` rather than
+    calling this — not because calling it would be wrong, but because the reply
+    the user saw and the reply the transcript keeps have to be the same string,
+    and the surest way to make them the same is to build it once.
+
+    It stays pure and public so the rule can be exercised without running a
+    graph; see scripts/check_agent.py.
     """
     answer = state.answer or "(no answer was produced)"
     if should_offer_ticket(state):
         return f"{answer}\n\n{ticket_offer(state.ticket_recipient)}"
     return answer
+
+
+def final_reply(state: AgentState) -> str:
+    """What a front end shows the user when a run comes back.
+
+    The graph composes this at the node that ends the run, so ordinarily this
+    just reads the field. The fallback covers a run that ended without one —
+    which a correctly wired graph does not do, but "the CLI printed nothing
+    because a node forgot a field" is a worse failure than a recomputed string,
+    and the recomputation is exact whenever the state is complete.
+    """
+    return state.reply if state.reply is not None else reply_for(state)

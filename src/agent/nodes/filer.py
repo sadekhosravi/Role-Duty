@@ -217,7 +217,12 @@ async def run(state: AgentState) -> dict:
         # The rewritten text replaces the reply rather than being appended
         # beside it, so the conversation holds what the user was actually shown.
         reply = AIMessage(text)
-    return {"answer": text, "messages": [reply]}
+    # `reply` as well as `answer`, because this branch ends the run: the
+    # orchestrator, which composes it for every other path, is never reached
+    # from here. There is no ticket offer to append — one was just filed — so
+    # the two are the same string, and saying so is cheaper than a front end
+    # having to work out which field a filed run left behind.
+    return {"answer": text, "reply": text, "messages": [reply]}
 
 
 SPEC = NodeSpec(

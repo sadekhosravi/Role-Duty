@@ -30,7 +30,7 @@ from fastapi.concurrency import run_in_threadpool
 from langchain_core.messages import AIMessage, HumanMessage
 
 from agent import observability
-from agent.conversation import reply_for, should_offer_ticket, ticket_offer
+from agent.conversation import final_reply, should_offer_ticket, ticket_offer
 from agent.graph import run_workflow
 from agent.state import AgentState
 
@@ -106,7 +106,10 @@ async def chat(request: AgentChatRequest, sessions: SessionsDep) -> AgentChatRes
             user_id=request.user_id,
             tags=request.tags,
         )
-        reply = reply_for(state)
+        # Read off the state rather than recomposed here: the node that ended
+        # the run built it, so this response and the CLI's differ in packaging
+        # only, never in wording.
+        reply = final_reply(state)
         # What is remembered is what the user was shown, offer included. Storing
         # the bare answer would leave the next turn's "yes" agreeing to nothing.
         session.record(request.message, reply, sessions.max_turns)
