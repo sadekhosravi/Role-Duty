@@ -17,8 +17,16 @@ validation corpus never mixes with your real graph in data/graph_rag. Nothing in
 src/ is modified — the script imports build_rag() and ANSWER_SYSTEM_PROMPT and
 calls aquery() exactly as query() does.
 
+Two things can be scored, and they are not the same thing. `--via graph`
+(the default) queries LightRAG directly: a few calls per question, measuring its
+retrieval and its answer prompt. `--via agent` runs the whole workflow over the
+chunkless section trees — find, read, answer, verify, revise — which is what a
+user actually gets, at many model calls per question. A score from one is not
+comparable with a score from the other, so the results file records which.
+
 Usage:
     python scripts/eval/run_eval.py                  # ingest if needed, then score
+    python scripts/eval/run_eval.py --via agent      # score the whole agent
     python scripts/eval/run_eval.py --ingest         # force a clean re-ingest
     python scripts/eval/run_eval.py --only A4,D5     # just these questions
     python scripts/eval/run_eval.py --mode local     # try another retrieval mode
@@ -41,9 +49,15 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 
-# The validation graph lives beside the validation PDFs, NOT in data/graph_rag.
-# This must be set before importing graph_rag, which reads it at import time.
-os.environ.setdefault("GRAPH_RAG_WORKING_DIR", str(ROOT / "data" / "val" / "graph_rag"))
+# Every store this run touches lives beside the validation PDFs, NOT in data/.
+# All of these are read at import time by the modules below, so they have to be
+# set before those imports and not a line later. The section stores were added
+# with --via agent: without them the agent would answer the validation questions
+# out of the real corpus, and score well doing it.
+_VAL = ROOT / "data" / "val"
+os.environ.setdefault("GRAPH_RAG_WORKING_DIR", str(_VAL / "graph_rag"))
+os.environ.setdefault("TREE_DIR", str(_VAL / "tree"))
+os.environ.setdefault("CHROMA_DIR", str(_VAL / "chroma"))
 
 # Parsed early because --no-cache must also land before the import below.
 _pre = argparse.ArgumentParser(add_help=False)
@@ -72,9 +86,10 @@ from graph_rag.prompts import ANSWER_SYSTEM_PROMPT  # noqa: E402
 
 load_dotenv()
 
-CORPUS_DIR = ROOT / "data" / "val" / "raw"
-QUESTIONS_FILE = ROOT / "data" / "val" / "questions.json"
-RESULTS_DIR = ROOT / "data" / "val" / "results"
+CORPUS_DIR = _VAL / "raw"
+QUESTIONS_FILE = _VAL / "questions.json"
+RESULTS_DIR = _VAL / "results"
+TREE_DIR = _VAL / "tree"
 
 WEIGHTS = {"facts": 25.0, "traps": 15.0, "citations": 10.0, "judge": 50.0}
 BANDS = [(90, "excellent"), (80, "strong"), (70, "workable"), (55, "weak"), (0, "failing")]
@@ -248,10 +263,8 @@ def band(score: float) -> str:
 
 # --- Run -----------------------------------------------------------------------
 
-async def answer_all(questions: list[dict], mode: str, concurrency: int) -> dict[str, dict]:
-    """Query the graph once per question. Returns {id: {answer, seconds}}."""
-    rag = await build_rag()
-    system_prompt = ANSWER_SYSTEM_PROMPT if CITE_SOURCES else None
+async def _gather(questions: list[dict], concurrency: int, answer_one) -> dict[str, dict]:
+    """Run `answer_one` over every question, `concurrency` at a time."""
     sem = asyncio.Semaphore(concurrency)
     out: dict[str, dict] = {}
 
@@ -259,21 +272,57 @@ async def answer_all(questions: list[dict], mode: str, concurrency: int) -> dict
         async with sem:
             start = time.perf_counter()
             try:
-                text = await rag.aquery(
-                    q["question"],
-                    system_prompt=system_prompt,
-                    param=QueryParam(mode=mode),
-                )
-            except Exception as exc:
+                text = await answer_one(q)
+            except Exception as exc:  # noqa: BLE001 - recorded as the answer
                 text = f"[QUERY FAILED] {type(exc).__name__}: {exc}"
             out[q["id"]] = {"answer": text, "seconds": time.perf_counter() - start}
             print(f"  answered {q['id']} ({out[q['id']]['seconds']:.1f}s)")
 
+    await asyncio.gather(*(one(q) for q in questions))
+    return out
+
+
+async def answer_via_graph(questions: list[dict], mode: str, concurrency: int) -> dict[str, dict]:
+    """Query the graph once per question. Returns {id: {answer, seconds}}."""
+    rag = await build_rag()
+    system_prompt = ANSWER_SYSTEM_PROMPT if CITE_SOURCES else None
+
+    async def one(q: dict) -> str:
+        return await rag.aquery(
+            q["question"], system_prompt=system_prompt, param=QueryParam(mode=mode)
+        )
+
     try:
-        await asyncio.gather(*(one(q) for q in questions))
+        return await _gather(questions, concurrency, one)
     finally:
         await rag.finalize_storages()
-    return out
+
+
+async def answer_via_agent(questions: list[dict], concurrency: int) -> dict[str, dict]:
+    """Run the whole agent workflow once per question.
+
+    A different thing to measure, and worth being explicit about which. `--via
+    graph` scores LightRAG's retrieval and its answer prompt. This scores the
+    system: chunkless retrieval, the researcher deciding what to read, the
+    responder writing from it, and the verifier sending it back when it is not
+    grounded. It costs many model calls per question rather than a few.
+
+    Imported here rather than at module scope because importing `agent` starts
+    the ticket MCP server to discover its tool — a subprocess this run has no
+    use for unless it is actually going to run the agent.
+
+    `state.answer` is taken, not `state.reply`: the ticket offer is a
+    conversational nicety with no bearing on whether the answer is right, and
+    including it would put "would you like me to file a ticket" in front of a
+    judge grading factual accuracy.
+    """
+    from agent.graph import run_workflow
+
+    async def one(q: dict) -> str:
+        state, _ = await run_workflow(q["question"], tags=["eval"])
+        return state.answer or "[NO ANSWER PRODUCED]"
+
+    return await _gather(questions, concurrency, one)
 
 
 async def run(args: argparse.Namespace) -> int:
@@ -318,7 +367,26 @@ async def run(args: argparse.Namespace) -> int:
         print(f"No PDFs in {CORPUS_DIR}. Run: uv run --with reportlab python scripts/eval/make_val_pdfs.py")
         return 1
 
-    # Ingest the validation corpus into its own graph if asked, or if empty.
+    # Ingest the validation corpus into its own stores if asked, or if empty.
+    # The graph is needed either way — `--via graph` queries it, and `--via
+    # agent` escalates to it, so scoring the agent against an empty graph would
+    # measure a cascade with its last tier missing and report it as a result.
+    # The section trees are only needed by the agent.
+    if args.via == "agent":
+        from doctree import ingest_directory
+
+        if args.ingest and TREE_DIR.exists():
+            print(f"Clearing {TREE_DIR}")
+            shutil.rmtree(TREE_DIR)
+        have_trees = TREE_DIR.exists() and any(TREE_DIR.glob("*.json"))
+        if not have_trees:
+            print(f"Parsing {CORPUS_DIR} -> {TREE_DIR}")
+            # Docling and Chroma are both synchronous, and this is the one place
+            # in the harness that would otherwise block the event loop for
+            # minutes with nothing else able to start.
+            total = await asyncio.to_thread(ingest_directory, CORPUS_DIR)
+            print(f"Indexed {total} sections.\n")
+
     graph_file = WORKING_DIR / "graph_chunk_entity_relation.graphml"
     if args.ingest and WORKING_DIR.exists():
         print(f"Clearing {WORKING_DIR}")
@@ -328,8 +396,9 @@ async def run(args: argparse.Namespace) -> int:
         total = await ingest(CORPUS_DIR)
         print(f"Ingested {total} sections.\n")
 
+    what = "the whole agent" if args.via == "agent" else f"the graph, mode {args.mode}"
     print(
-        f"Model {LLM_MODEL} | mode {args.mode} | rerank "
+        f"Model {LLM_MODEL} | via {args.via} ({what}) | rerank "
         f"{RERANK_MODEL if RERANK_ENABLED else 'off'} | answer cache "
         f"{'on' if LLM_CACHE_ENABLED else 'off'} | {len(questions)} questions"
     )
@@ -337,7 +406,10 @@ async def run(args: argparse.Namespace) -> int:
         print("  note: cache on - repeated runs may replay earlier answers (--no-cache to force fresh)")
     print()
 
-    answers = await answer_all(questions, args.mode, args.concurrency)
+    if args.via == "agent":
+        answers = await answer_via_agent(questions, args.concurrency)
+    else:
+        answers = await answer_via_graph(questions, args.mode, args.concurrency)
 
     use_judge = not args.no_judge
     judge_client = None
@@ -438,10 +510,15 @@ def report(results: list[dict], args: argparse.Namespace) -> None:
         "settings": {
             "llm_model": LLM_MODEL,
             "judge_model": args.judge_model if not args.no_judge else None,
-            "mode": args.mode,
+            # `via` first: two results files with different values here are not
+            # comparable, and reading one without knowing which path produced it
+            # is how a graph score gets quoted as an agent score.
+            "via": args.via,
+            "mode": args.mode if args.via == "graph" else None,
             "rerank": RERANK_MODEL if RERANK_ENABLED else None,
             "llm_cache": LLM_CACHE_ENABLED,
             "working_dir": str(WORKING_DIR),
+            "tree_dir": str(TREE_DIR) if args.via == "agent" else None,
         },
         "by_difficulty": _group(results, "difficulty"),
         "by_document": _group(results, "doc"),
@@ -456,6 +533,17 @@ def report(results: list[dict], args: argparse.Namespace) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Score the GraphRAG setup against data/val.")
     parser.add_argument("--ingest", action="store_true", help="Wipe and re-ingest the validation corpus first.")
+    parser.add_argument(
+        "--via",
+        default="graph",
+        choices=["graph", "agent"],
+        help=(
+            "What to score. 'graph' queries LightRAG directly — a few calls per "
+            "question, and it measures retrieval plus one answer prompt. 'agent' "
+            "runs the whole workflow over the section trees, which is what the "
+            "user actually gets, at many model calls per question."
+        ),
+    )
     parser.add_argument("--mode", default="hybrid", choices=["naive", "local", "global", "hybrid", "mix"])
     parser.add_argument("--only", help="Comma-separated question ids, e.g. A4,D5")
     parser.add_argument("--no-judge", action="store_true", help="Deterministic checks only (no judge calls).")

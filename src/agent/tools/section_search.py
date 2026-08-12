@@ -20,6 +20,8 @@ prints it. The id is how you ask for something; the label is how you refer to it
 
 from __future__ import annotations
 
+import logging
+
 from langchain_core.tools import tool
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -27,6 +29,8 @@ from doctree import corpus, find_sections
 from doctree.index import search_headings
 
 from ._stores import get_heading_collection
+
+log = logging.getLogger(__name__)
 
 # How much of a section shows up in a search result. A choosing aid: enough to
 # tell whether this is the section you want, short enough that reading twenty of
@@ -169,13 +173,9 @@ async def _heading_candidates(question: str, limit: int) -> list[str]:
     strings, which is most of what this corpus is asked for, and a researcher
     that gets nothing has no way to report a gap either.
     """
-    import logging
-
     try:
         hits = search_headings(get_heading_collection(), question, top_k=limit)
     except Exception as error:  # noqa: BLE001 - logged, then degraded
-        logging.getLogger(__name__).warning(
-            "heading search failed (%s); falling back to keyword-only", error
-        )
+        log.warning("heading search failed (%s); falling back to keyword-only", error)
         return []
     return [hit["id"] for hit in hits]

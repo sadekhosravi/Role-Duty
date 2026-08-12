@@ -754,9 +754,9 @@ def check_corpora() -> None:
     """
     print("\nCorpus agreement between the two stores")
     try:
+        import doctree.tree as tree
         import graph_rag.extraction as graph_extraction
         from doctree import corpus
-        from doctree.tree import Node
         from graph_rag.graph_rag import WORKING_DIR
 
         store = corpus()
@@ -817,7 +817,7 @@ def check_corpora() -> None:
     )
     check(
         "both stores label sections with the same function",
-        Node.label.fget.__globals__["section_label"] is graph_extraction.section_label,
+        tree.section_label is graph_extraction.section_label,
         "separate implementations are what let the two ingests drift apart",
     )
     # An id has to resolve, or a search hands the model something read_section

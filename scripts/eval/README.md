@@ -1,18 +1,30 @@
 # Validation harness
 
-Scores the **current** GraphRAG configuration — whatever `.env` says today — out
-of 100 against a purpose-built corpus of five fictional Role & Duty documents.
-Nothing in `src/` is touched: the runner imports `build_rag()` and
-`ANSWER_SYSTEM_PROMPT` and calls `aquery()` the same way `query()` does.
+Scores the **current** configuration — whatever `.env` says today — out of 100
+against a purpose-built corpus of five fictional Role & Duty documents. Nothing
+in `src/` is touched: the runner calls the same entry points the CLIs call.
+
+Two different things can be scored, and a number from one does not compare with
+a number from the other:
+
+| | `--via graph` (default) | `--via agent` |
+| --- | --- | --- |
+| What runs | LightRAG's `aquery` with `ANSWER_SYSTEM_PROMPT` | the whole workflow: find, read, answer, verify, revise |
+| Retrieval | the knowledge graph | chunkless section trees, with the graph as escalation |
+| Cost | a few model calls per question | many, and minutes on a hard one |
+| Answers | "is the graph any good" | "is the thing a user talks to any good" |
+
+The results file records `settings.via`, so a saved run always says which it was.
 
 ```bash
 # 1. Build the corpus (only needed once, or after editing the documents)
 uv run --with reportlab python scripts/eval/make_val_pdfs.py
 
-# 2. Ingest it into its own graph and score every question
-uv run python scripts/eval/run_eval.py --ingest
+# 2. Ingest it into its own stores and score every question
+uv run python scripts/eval/run_eval.py --ingest            # the graph
+uv run python scripts/eval/run_eval.py --via agent         # the whole agent
 
-# later runs, reusing the ingested graph
+# later runs, reusing what was ingested
 uv run python scripts/eval/run_eval.py
 ```
 
@@ -29,9 +41,13 @@ uv run python scripts/eval/run_eval.py --check-key
 uv run python scripts/eval/run_eval.py --rescore data/val/results/eval_<stamp>.json
 ```
 
-The validation graph is written to `data/val/graph_rag`, **not** `data/graph_rag`
-— your real corpus is never mixed with the fixtures. `--ingest` wipes and
-rebuilds only the validation graph.
+Every store this harness touches is redirected under `data/val/` — the graph to
+`data/val/graph_rag`, the section trees to `data/val/tree`, the heading index to
+`data/val/chroma`. Your real corpus is never mixed with the fixtures, and
+`--ingest` wipes and rebuilds only the validation ones. The redirection is done
+by setting env vars before the imports at the top of `run_eval.py`, because each
+of those modules reads its path at import time; move an import above them and
+the agent will quietly answer the validation questions out of your real corpus.
 
 ## Files
 
