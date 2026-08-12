@@ -219,9 +219,11 @@ and `/agent/chat` apply it. `check_agent.py` still reaches it through
 
 ### Known drift to be aware of
 
-The README and `requirements.txt` describe a self-contained sentence-transformers setup, but `embeddings.py` and `pyproject.toml` (`openai`, `docling`, `chromadb`) reflect the current OpenRouter-based reality. When touching embeddings or dependencies, treat the code as the source of truth and reconcile the docs.
+One left. `config.py`'s `EMBEDDING_MODEL` default is still `sentence-transformers/all-MiniLM-L6-v2`, a name OpenRouter cannot serve — a leftover from the pre-OpenRouter setup, so the setting is effectively required rather than optional. `.env.example` carries a working value and the README says so; the fallback itself has not been changed, because doing it silently would move a documented failure into a surprising one.
+
+The README and `requirements.txt` drift is resolved: neither mentions sentence-transformers any more, and `requirements.txt` is kept in step with `pyproject.toml`. When touching embeddings or dependencies, still treat the code as the source of truth and reconcile the docs.
 
 ## Data & secrets
 
 - `data/raw/` holds input PDFs (gitignored); `data/tree/` holds the section trees as JSON and is the source of truth for retrieval; `data/chroma/` is the derived heading index, created automatically; `data/tickets/` holds filed tickets as `.docx`, created on the first ticket. All gitignored via `data/*`. Override the tickets location with `TICKETS_DIR`, the trees with `TREE_DIR`.
-- `.env` holds real credentials and is gitignored. No `.env.example` currently exists despite the README referencing one.
+- `.env` holds real credentials and is gitignored. `.env.example` is committed and must never hold a real key; it documents every setting the code reads, including `LLM_MODEL`, `EMBEDDING_MODEL` and `RERANK_MODEL`. Add new settings there when you add them to `config.py`.

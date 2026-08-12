@@ -33,6 +33,13 @@ the combination this corpus punishes you for splitting up. `graph_rag_search`
 ([LightRAG](https://github.com/HKUDS/LightRAG)) stays as the escalation tier:
 the only retriever that returns *relationships*, and the expensive one.
 
+**Retrieval is deterministic — the model only decides what to look for.** Docling
+parses the PDF, `tree.py` assembles the sections from its heading paths, BM25
+ranks over their text and RRF fuses the two lists; none of that calls a language
+model. The one model in the retrieval path is the embedding model behind the
+heading index. The chat model reads the question, picks the search and writes the
+answer, but it never decides what a section says.
+
 **The orchestrator decides when to stop.** The verifier grades and hands its
 verdict back like any other worker; nothing but the orchestrator can end a run.
 An evaluator that could also halt would be a second controller, and the loop
@@ -62,13 +69,15 @@ Role-Duty/
 │   ├── raw/            # drop your PDFs here
 │   ├── tree/           # the section trees, one JSON per PDF — source of truth
 │   ├── chroma/         # heading index, derived from the trees
-│   └── tickets/        # filed tickets, as .docx (created automatically)
+│   ├── tickets/        # filed tickets, as .docx (created automatically)
+│   └── val/            # the validation corpus and its own stores, never mixed in
 ├── scripts/
 │   ├── ingest.py       # PDF -> section tree -> heading index
 │   ├── query.py        # find sections, read one, or print an outline
 │   ├── agent.py        # a conversation with the agent
 │   ├── serve.py        # the HTTP API (Swagger at /docs)
-│   └── check_agent.py  # the agent's wiring, checked offline
+│   ├── check_agent.py  # the agent's wiring, checked offline
+│   └── eval/           # the scored validation run — see its own README
 ├── src/doctree/
 │   ├── tree.py         # Node/Document — the section tree itself
 │   ├── store.py        # JSON per document, and reading a section whole
@@ -76,7 +85,7 @@ Role-Duty/
 │   ├── search.py       # heading search fused with BM25, always both
 │   └── ingest.py       # PDF -> tree -> index
 ├── src/rag/            # settings, the embedding model, the Chroma client
-├── src/graph_rag/      # LightRAG graph ingest, query, and BM25 search
+├── src/graph_rag/      # Docling extraction (both stores use it), and LightRAG
 ├── src/agent/          # the LangGraph workflow — see src/agent/graph.py
 ├── src/api/            # FastAPI over all of the above — see src/api/main.py
 └── src/ticket_mcp/     # MCP server: writes a ticket as a Word document
@@ -101,9 +110,13 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-You need an [OpenRouter](https://openrouter.ai/keys) key — it is used for both
-the chat model and the embeddings. Everything else in `.env.example` has a
-working default.
+You need an [OpenRouter](https://openrouter.ai/keys) key — one key serves the
+chat model, the embeddings and the reranker. Everything else in `.env.example`
+has a working default; see [The models](#the-models) for what each one drives.
+
+> With uv there is nothing to activate: prefix every command below with
+> `uv run` (`uv run python scripts/agent.py …`). With the venv, activate it once
+> and run `python` directly.
 
 ## Usage
 
@@ -130,7 +143,8 @@ working default.
    python scripts/query.py --read sample-role-duties#shift-supervisor
    ```
 
-4. Check the wiring at any point. ~150 assertions, offline, no API key needed:
+4. Check the wiring at any point. 187 assertions, offline, no API key needed —
+   one of them is a known failure, see [Known rough edges](#known-rough-edges):
 
    ```bash
    python scripts/check_agent.py
@@ -326,15 +340,65 @@ Other settings, all optional:
 
 All of this lives in `src/agent/observability.py`; no node knows about it.
 
-## Changing the embedding model
+## The models
 
-`src/rag/embeddings.py` is the single place text becomes vectors. It uses
-Chroma's `OpenAIEmbeddingFunction` pointed at OpenRouter, so `EMBEDDING_MODEL`
-in `.env` picks the model; replace that one function to change provider.
+Three of them, all reached through OpenRouter on the one key:
 
-> After changing it, **re-ingest everything**. Vectors from different models are
-> not comparable, and the persisted store in `data/chroma/` still holds the old
-> ones.
+| Variable | Default | What it drives |
+| --- | --- | --- |
+| `LLM_MODEL` | `openai/gpt-4o-mini` | Every node of the agent, and LightRAG's entity extraction. |
+| `EMBEDDING_MODEL` | none that works — set it | The heading index, and the graph's vector half. Nothing else. |
+| `RERANK_MODEL` | `cohere/rerank-v3.5` | Re-scores graph candidates against the question. `RERANK=false` skips the step. |
+
+`src/rag/embeddings.py` is the single place text becomes vectors — Chroma's
+`OpenAIEmbeddingFunction` pointed at OpenRouter — so `EMBEDDING_MODEL` picks the
+model and replacing that one function changes the provider. It has no usable
+fallback: `src/rag/config.py` still defaults to a sentence-transformers name
+OpenRouter cannot serve, left over from an earlier local setup. `.env.example`
+carries a working value; keep one there.
+
+Two things to know before you change either model:
+
+> **Changing the embedding model means re-ingesting.** Vectors from different
+> models are not comparable and `data/chroma/` still holds the old ones.
+> `data/tree/` is unaffected — it stores no vectors, so the re-index does not
+> need another Docling parse.
+
+> **Changing the chat model means deleting LightRAG's cache first.** Its
+> response cache in `data/graph_rag/kv_store_llm_response_cache.json` keys
+> extractions by prompt, without the model name, so a re-ingest replays the
+> *previous* model's work and reports success. Delete the file, then re-ingest.
+
+## Measuring it
+
+`scripts/eval/` scores the current configuration out of 100 against a
+purpose-built corpus of five fictional organisations sharing one world, so the
+cross-document questions are real rather than decorative. The traps are planted
+deliberately: three roles whose titles all end in "Duty Manager" with different
+authority, a Battalion Chief who outranks the Fire Marshal on scene but cannot
+close an occupancy, one question resting on a false premise, and one the
+documents simply do not answer.
+
+```bash
+uv run --with reportlab python scripts/eval/make_val_pdfs.py   # build the corpus
+uv run python scripts/eval/run_eval.py --ingest                # score the graph
+uv run python scripts/eval/run_eval.py --via agent             # score the agent
+```
+
+`--via` chooses what is being measured, and the two numbers do not compare:
+`graph` asks LightRAG directly, `agent` runs the whole workflow — find, read,
+answer, verify, revise. Every store the harness touches is redirected under
+`data/val/`, so the fixtures never mix with your corpus. `--no-judge` drops the
+LLM judge, which makes a run free and fast enough to use while editing prompts,
+at the cost of being generous.
+
+Recorded baseline: **87.9 / 100**, `--via graph`, `google/gemini-2.5-flash`,
+2026-07-23 — no trap tripped. There is no recorded `--via agent` run: the mode
+is newer than the baseline, and a full pass is many model calls per question and
+minutes on a hard one.
+
+Scoring weights, what each trap is for, and how to read a result:
+`scripts/eval/README.md`.
 
 ## Known rough edges
 
