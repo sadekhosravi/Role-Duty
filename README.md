@@ -347,11 +347,19 @@ Written down rather than hidden, because they are the honest state of it:
   from several. The prompts work hard to keep them apart; a question naming an
   organisation the corpus also documents can still burn most of the delegation
   budget on the wrong one.
-- Docling does not always detect a heading. Where it misses one, that role's
-  sub-sections end up at the top of the tree with no owner rather than being
-  attributed to the previous role — uninformative, which is the right failure,
-  but `python scripts/query.py --outline` will show a few bare
-  `Key Responsibilities` nodes because of it.
+- Docling's heading detection is not reliable, and the tree inherits whatever it
+  decides. Two failure shapes, one fixed and one not:
+  - **Fixed.** It sometimes reads a role's `Reports To: …` line as a heading at
+    the role's own level, which made the chunker drop the role's title
+    entirely — five roles across the validation corpus were addressable only as
+    "Reports To: Fire Chief" and the like. `extraction.py` now recovers the
+    owner from the document item stream, where both headings still exist in
+    order.
+  - **Not fixed.** Where a heading is missed altogether, that role's
+    sub-sections stay at the top of the tree with no owner rather than being
+    attributed to the previous role — uninformative, which is the right
+    failure, but `python scripts/query.py --outline` will show the odd bare
+    `Key Responsibilities` node because of it.
 - The heading index embeds each section's heading path *plus its opening
   words*, not the heading path alone. Half the headings in this corpus are
   structural ("Out of Scope"), so a pure-heading key has nothing for a question
