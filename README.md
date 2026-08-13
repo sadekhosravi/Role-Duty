@@ -12,50 +12,173 @@ that go to, and does it stop there?"*, which turns on an escalation chain, on
 what a role is explicitly **not** allowed to do, and on not confusing two
 organisations that both have a "Duty Manager".
 
-Built on [LangGraph](https://github.com/langchain-ai/langgraph), with chunkless
-retrieval over the corpus, an evaluator loop, MCP for the one action that writes
-to disk, and Langfuse for tracing.
+## The stack
+
+Three ideas stacked on each other, and the whole point is the stacking:
+
+| Layer | Technology | What it contributes |
+| --- | --- | --- |
+| **Agentic RAG** | [LangGraph](https://github.com/langchain-ai/langgraph) orchestrator-workers + evaluator loop | An agent that *decides* what to retrieve, reads it, notices what is missing, and retrieves again — instead of one fixed retrieve-then-generate pass. |
+| **Chunkless RAG** | [Docling](https://github.com/docling-project/docling) → section tree → Chroma heading index + [BM25](https://github.com/dorianbrown/rank_bm25), fused with RRF | The primary retriever. Documents keep the section structure their author wrote; retrieval finds a section and reads it whole. |
+| **Graph RAG** | [LightRAG](https://github.com/HKUDS/LightRAG) knowledge graph | The escalation tier. The only retriever that returns **relationships** — reporting lines, escalation chains, cross-document hops. |
+
+Plus [MCP](https://modelcontextprotocol.io) for the one action that writes to
+disk, and [Langfuse](https://langfuse.com) for tracing.
 
 ```
-START ─> orchestrator ─> researcher ─> back to orchestrator
-                      ─> filer ─> END
-                      ─> responder ─> verifier ─> back to orchestrator
-                      ─> finish ─> END
+START
+  │
+  ▼
+orchestrator ─────> researcher ──────────────────> back to orchestrator
+     │                 ├── find_section, read_section    Chunkless RAG (primary)
+     │                 └── graph_rag_search              Graph RAG (escalation)
+     │
+     ├─────────────> responder ──> verifier ──────> back to orchestrator
+     │
+     ├─────────────> filer ──> create_ticket (MCP) ────> END
+     │
+     └─────────────> finish ───────────────────────────> END
 ```
 
-**Nothing is chunked.** The documents are not cut into fixed-size windows —
-they are kept as the tree of sections their author wrote, one JSON file per PDF
-under `data/tree/`. Retrieval is then the two steps a person would take:
-`find_section` shortlists (heading embeddings fused with BM25, both on every
-call), and `read_section` returns one section whole, sub-sections included. A
-role's duties, its exclusions and its escalation path arrive together, which is
-the combination this corpus punishes you for splitting up. `graph_rag_search`
-([LightRAG](https://github.com/HKUDS/LightRAG)) stays as the escalation tier:
-the only retriever that returns *relationships*, and the expensive one.
+The orchestrator is the hub: every worker reports back to it, and only it can
+route to `finish`. The filer is the one exception — it acts rather than
+gathers, so its confirmation is already the reply and it ends the run itself.
 
-**Retrieval is deterministic — the model only decides what to look for.** Docling
-parses the PDF, `tree.py` assembles the sections from its heading paths, BM25
-ranks over their text and RRF fuses the two lists; none of that calls a language
-model. The one model in the retrieval path is the embedding model behind the
-heading index. The chat model reads the question, picks the search and writes the
-answer, but it never decides what a section says.
+---
 
-**The orchestrator decides when to stop.** The verifier grades and hands its
-verdict back like any other worker; nothing but the orchestrator can end a run.
-An evaluator that could also halt would be a second controller, and the loop
-bounds would have to be read in two places — which is how they were, and they
-disagreed.
+## Chunkless RAG
 
-**Grounding is checked, not requested.** The responder cannot retrieve, so the
-verifier grades its claims against the same evidence the responder had. Citation
-labels are validated by string comparison against what the tools actually
+**The problem with chunks.** Classic RAG cuts documents into fixed-size
+overlapping windows, embeds each one, and returns the top *k* by cosine
+similarity. The cut is arbitrary with respect to meaning, and this corpus
+punishes that specifically. Every role's entry has three parts — its duties, an
+**Out of Scope** list, and an **Escalation Path** — and a window boundary
+falling between the first two produces retrieval that says a role does something
+its own document explicitly forbids. Worse, "Duty Manager" appears in three
+organisations with different authority, and their windows look nearly identical
+in embedding space.
+
+**What we do instead.** The document keeps the shape its author gave it. Docling
+recovers the heading path for each piece of text; `doctree/tree.py` nests those
+paths by prefix into a tree of `Node`s, one per section, addressed by a slug of
+its own path:
+
+```
+sample-role-duties-hotel#housekeeping-supervisor-housekeeping/escalation-path
+```
+
+One JSON file per PDF under `data/tree/`, and that file is the source of truth.
+`data/chroma/` is derived from it and can be deleted and rebuilt without
+re-running Docling.
+
+**Retrieval is find-then-read** — the two steps a person would take:
+
+1. **`find_section(question)`** shortlists. Two retrievers run on *every* call:
+   a Chroma vector search over the heading index, and BM25 over the full text of
+   every section. Their ranked lists are fused by **Reciprocal Rank Fusion**
+   (k=60) — by rank alone, because a cosine distance and a BM25 score share no
+   scale and cannot be averaged. It returns previews and section ids.
+2. **`read_section(id)`** returns that section **whole**, sub-sections included.
+   The duties, the exclusions and the escalation path arrive together, which is
+   the combination that must not be split.
+
+The heading index embeds each section's heading path **plus its first 400
+characters**, not the path alone: half the headings here are structural ("Out of
+Scope") and a pure-heading key has nothing for a content question to match. That
+row is only how a section is *found* — what comes back is always the whole
+section from the tree, which is what makes this not a chunk by another name.
+
+**None of that calls a language model.** Docling's parse, the tree assembly,
+BM25 and RRF are all deterministic. The single model in the retrieval path is
+the embedding model behind the heading index. The chat model chooses what to
+search for and writes the answer; it never decides what a section says.
+
+---
+
+## Graph RAG
+
+Chunkless retrieval is excellent at *"what does this role do?"* and weak at
+*"who does this eventually reach?"* — because the answer to the second is not
+in any one section. It is in the relationships between them, possibly across
+documents.
+
+So the corpus is ingested a second time, into a **knowledge graph**. At ingest,
+LightRAG has an LLM read every section and extract its **entities** (roles,
+duties, departments) and the **relationships** between them (reports to,
+escalates to, may not authorise), building a graph plus embeddings over both the
+entities and the relations. A query then matches entities, walks the edges, and
+returns the sub-graph with the source text behind it.
+
+`graph_rag_search` exposes three strategies:
+
+| Mode | What it retrieves | Use it for |
+| --- | --- | --- |
+| `local` | one entity's immediate neighbourhood | a single role's surroundings |
+| `global` | relationship-centric, across the graph | broad thematic questions |
+| `hybrid` *(default)* | both | most questions, including multi-hop |
+
+Two deliberate constraints:
+
+- **It returns context, not an answer.** The call sets
+  `only_need_context=True`, so LightRAG stops after retrieval and hands back
+  what it assembled. Reasoning over that evidence is the agent's job, not the
+  retriever's.
+- **LightRAG's own vector modes (`naive`, `mix`) are not exposed.** Its vector
+  half indexes *its* chunks, which are cut differently from our sections, so
+  enabling them would put two incompatible views of the same corpus into one
+  result and leave the agent reconciling two vocabularies.
+
+It is the **escalation** tier, not the opening move, because it runs its own
+model calls per query and its ingest costs an LLM read of the entire corpus.
+When the graph matches no entities it returns nothing — silently — so the
+researcher's prompt says to go back to `find_section` with the literal title
+rather than retry the graph.
+
+---
+
+## Agentic RAG — how the agent works
+
+A pipeline answers a lookup. These questions need something to decide what to
+look for, read it, notice a gap, look again, and know when to stop. That is the
+agent: a LangGraph **orchestrator-workers** workflow with an **evaluator loop**.
+
+| Node | Tools | What it does |
+| --- | --- | --- |
+| **orchestrator** | none | Reads the state and picks exactly one destination. The only node that routes, and the only one that can end a run. |
+| **researcher** | `find_section`, `read_section`, `graph_rag_search` | The only node that retrieves. Loops on its own tools until it has enough, then reports. |
+| **responder** | none | Writes the answer from the evidence already gathered. It cannot retrieve, so it cannot ground a claim in something nobody read. |
+| **verifier** | none | Grades the draft against that same evidence and hands the verdict back like any other worker. |
+| **filer** | `create_ticket` (MCP) | The only node with a side effect. Writes a ticket as a Word document, then ends the run. |
+
+A run is a loop: orchestrator → worker → back to orchestrator, again, until it
+routes to the responder. The draft goes to the verifier, and the verdict comes
+back to the orchestrator, which either revises or finishes. Four properties
+hold it together:
+
+**The orchestrator decides when to stop.** The verifier grades and reports;
+nothing but the orchestrator can end a run. An evaluator that could also halt
+would be a second controller, and the loop bounds would have to be read in two
+places — which is how they were, and they disagreed. The model cannot even
+express "stop": `finish` is absent from the enum it picks from, and
+`_is_done()` decides it in Python from the verdict and the counters.
+
+**Grounding is checked, not requested.** Because the responder cannot retrieve,
+the verifier grades its claims against exactly the evidence it had. Citation
+labels are validated by **string comparison** against what the tools actually
 returned — prompting for correct citations failed twice, first by inventing
 plausible labels with shifted page numbers, then by stripping the file and page
 instead of copying them. String comparison is not persuadable.
 
-**Every loop is bounded.** Delegations, revisions and retrievals each have a cap,
-because a disagreement between two nodes otherwise runs until the recursion limit
-kills the request and returns nothing at all.
+**Tool access is per node, and that is the whole security boundary.** Each node
+is bound only the tools its spec lists and gets its own executor, so it cannot
+name or reach another node's. `create_ticket` appears in exactly one list, which
+is what separates "the agent can answer" from "the agent can write files" —
+`scripts/check_agent.py` asserts it.
+
+**Every loop is bounded.** 8 delegations, 2 revisions, 8 retrievals, 1 ticket
+per turn. Without them a disagreement between two nodes runs until LangGraph's
+recursion limit kills the request and returns nothing at all, rather than an
+imperfect answer. Past a budget the tools are *unbound* rather than discouraged.
 
 > Built as a learning project, one step at a time. Most comments in the code
 > explain *why* something is the way it is, usually because the obvious
@@ -122,12 +245,18 @@ has a working default; see [The models](#the-models) for what each one drives.
 
 1. Put one or more PDFs in `data/raw/`.
 
-2. Ingest them — twice, once into each store:
+2. Ingest them **twice**, once per retriever — the two stores are independent
+   and neither updates the other:
 
    ```bash
-   python scripts/ingest.py                       # -> section trees + heading index
-   python src/graph_rag/graph_rag.py ingest data/raw   # -> LightRAG graph
+   python scripts/ingest.py                            # Chunkless: section trees + heading index
+   python src/graph_rag/graph_rag.py ingest data/raw   # Graph RAG: the LightRAG knowledge graph
    ```
+
+   The first is Docling plus embeddings and takes about a minute per PDF. The
+   second has an LLM read every section to extract entities and relationships —
+   it is the slow, expensive one, and the reason Graph RAG is the escalation
+   tier rather than the default.
 
 3. Ask it something:
 
@@ -424,10 +553,10 @@ Written down rather than hidden, because they are the honest state of it:
     attributed to the previous role — uninformative, which is the right
     failure, but `python scripts/query.py --outline` will show the odd bare
     `Key Responsibilities` node because of it.
-- The heading index embeds each section's heading path *plus its opening
-  words*, not the heading path alone. Half the headings in this corpus are
-  structural ("Out of Scope"), so a pure-heading key has nothing for a question
-  about a *thing* to match. BM25 over the full text covers the rest.
+- Graph RAG is ingested separately and can silently fall behind. Adding a PDF to
+  the section trees does not add it to the graph — `POST /ingest/graph` and the
+  `graph_rag.py ingest` CLI are their own step, and a question that escalates to
+  a graph missing that document gets nothing back rather than an error.
 - The API keeps its jobs and its conversations in the serving process, so a
   restart loses both and a second worker would break the graph write lock. Fine
   for one node; not a deployment.
